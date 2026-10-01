@@ -1,0 +1,34 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('training_counsellors', function (Blueprint $table) {
+            $table->json('consultation_availability')->nullable()->after('availability');
+            $table->boolean('show_own_consultation_availability')->default(false)->after('consultation_availability');
+            $table->boolean('show_vanquish_consultation_availability')->default(true)->after('show_own_consultation_availability');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('training_counsellors', function (Blueprint $table) {
+            $table->dropColumn([
+                'consultation_availability',
+                'show_own_consultation_availability',
+                'show_vanquish_consultation_availability',
+            ]);
+        });
+    }
+};
