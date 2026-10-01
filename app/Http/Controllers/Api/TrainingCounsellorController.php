@@ -1688,8 +1688,9 @@ class TrainingCounsellorController extends Controller
                     'role'                    => 'counsellor',
                     'training_counsellor_id'  => $tc->id,
                 ]);
-            } elseif ($existingUser->role !== 'counsellor') {
+            } else {
                 $existingUser->update([
+                    'name'                   => $tc->name,
                     'role'                   => 'counsellor',
                     'training_counsellor_id' => $tc->id,
                 ]);
@@ -1778,8 +1779,9 @@ class TrainingCounsellorController extends Controller
                         'role'                    => 'counsellor',
                         'training_counsellor_id'  => $tc->id,
                     ]);
-                } elseif ($existingUser->role !== 'counsellor') {
+                } else {
                     $existingUser->update([
+                        'name'                   => $tc->name,
                         'role'                   => 'counsellor',
                         'training_counsellor_id' => $tc->id,
                     ]);
