@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ClientIntakeForm;
 use App\Models\TcIntakeForm;
 use App\Models\TraineeApplication;
+use App\Models\Person;
 use App\Models\Client;
 use App\Models\TrainingCounsellor;
 use Illuminate\Http\Request;
@@ -199,7 +200,14 @@ class IntakeFormController extends Controller
             if ($shouldCreateClient) {
                 $newClientId = Client::generateNextClientId();
 
+                $person = Person::findOrCreateByEmail(
+                    strtolower(trim($validated['email'])),
+                    "{$validated['first_name']} {$validated['last_name']}",
+                    $validated['phone'] ?? null
+                );
+
                 $client = Client::create([
+                    'person_id' => $person->id,
                     'client_id' => $newClientId,
                     'name' => "{$validated['first_name']} {$validated['last_name']}",
                     'first_name' => $validated['first_name'] ?? null,
@@ -302,6 +310,32 @@ class IntakeFormController extends Controller
                 } elseif (!empty($validated['consultation_slot_id'])) {
                     $this->bookingService->finalize($client, (int) $validated['consultation_slot_id'], $consultation);
                 }
+            } elseif ($client) {
+                // For paid consultation intakes, pre-create the consultation record with slot attached
+                $scheduledAt = now();
+                if (!empty($validated['consultation_slot_id'])) {
+                    $chosenSlot = \App\Models\ConsultationSlot::find($validated['consultation_slot_id']);
+                    if ($chosenSlot) {
+                        $scheduledAt = $chosenSlot->consultation_datetime;
+                    }
+                } elseif (!empty($validated['consultation_datetime'])) {
+                    $scheduledAt = Carbon::parse($validated['consultation_datetime']);
+                }
+
+                $consultationTc = !empty($validated['consultation_with_tc_uuid'])
+                    ? TrainingCounsellor::where('uuid', $validated['consultation_with_tc_uuid'])->first()
+                    : null;
+
+                \App\Models\Consultation::create([
+                    'consultation_id' => \App\Models\Consultation::generateNextConsultationId(),
+                    'client_id' => $client->id,
+                    'consultation_slot_id' => $validated['consultation_slot_id'] ?? null,
+                    'tc_id' => $consultationTc?->id,
+                    'scheduled_at' => $scheduledAt,
+                    'payment_status' => 'pending',
+                    'payment_amount' => $validated['consultation_fee'] ?? 15,
+                    'status' => 'pending',
+                ]);
             }
 
             return response()->json([
@@ -509,12 +543,18 @@ class IntakeFormController extends Controller
 
             // Also Create a recruitment-style TraineeApplication so it shows up in the unified dashboard
             try {
-                $application = TraineeApplication::updateOrCreate(
-                    ['email' => $validated['email']],
-                    [
-                        'first_name'  => explode(' ', $validated['name'], 2)[0] ?? $validated['name'],
-                        'last_name'   => explode(' ', $validated['name'], 2)[1] ?? '',
-                        'email'       => $validated['email'],
+                $normalizedEmail = strtolower(trim($validated['email']));
+                $person = Person::findOrCreateByEmail(
+                    $normalizedEmail,
+                    $validated['name'],
+                    $validated['phone'] ?? null
+                );
+
+                $application = TraineeApplication::create([
+                    'person_id'   => $person->id,
+                    'first_name'  => explode(' ', $validated['name'], 2)[0] ?? $validated['name'],
+                    'last_name'   => explode(' ', $validated['name'], 2)[1] ?? '',
+                    'email'       => $normalizedEmail,
                         'phone'       => $validated['phone'] ?? null,
                         'source'      => 'internal_form',
                         'status'      => 'New Application',
