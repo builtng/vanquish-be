@@ -910,28 +910,73 @@ class TrainingCounsellorController extends Controller
         $tc = null;
 
         if (!empty($tcIdParam)) {
-            // Find TC by numeric ID, tc_id string, or uuid
+            // Find TC by numeric ID, tc_id string, or uuid (active only)
             $tc = is_numeric($tcIdParam)
-                ? TrainingCounsellor::find($tcIdParam)
+                ? TrainingCounsellor::whereNull('archived_at')->find($tcIdParam)
                 : null;
 
             if (!$tc) {
-                $tc = TrainingCounsellor::where('tc_id', $tcIdParam)
-                    ->orWhere('uuid', $tcIdParam)
-                    ->orWhere('id', $tcIdParam)
+                $tc = TrainingCounsellor::whereNull('archived_at')
+                    ->where(function ($q) use ($tcIdParam) {
+                        $q->where('tc_id', $tcIdParam)
+                            ->orWhere('uuid', $tcIdParam)
+                            ->orWhere('id', $tcIdParam);
+                    })
                     ->first();
             }
         }
 
-        // If no existing TC found or no tc_id provided, check by email
-        if (!$tc && !empty($validated['email'])) {
-            $tc = TrainingCounsellor::withTrashed()->where('email', strtolower(trim($validated['email'])))->first();
-            if ($tc && $tc->trashed()) {
-                $tc->restore();
-            }
+        $normalizedEmail = strtolower(trim($validated['email']));
+        $fullName = trim($validated['legal_first_name'] . ' ' . $validated['legal_last_name']);
+
+        // 1. Always find or create a permanent Person identity record
+        $person = Person::findOrCreateByEmail($normalizedEmail, $fullName, $validated['phone'] ?? null);
+
+        // 2. Always record each submission as its OWN separate, immutable QcApplication record
+        $qcApp = QcApplication::create([
+            'person_id' => $person->id,
+            'legal_first_name' => $validated['legal_first_name'],
+            'legal_last_name' => $validated['legal_last_name'],
+            'email' => $normalizedEmail,
+            'phone' => $validated['phone'] ?? null,
+            'registered_address' => $validated['registered_address'],
+            'registered_city' => $validated['registered_city'],
+            'registered_postcode' => $validated['registered_postcode'],
+            'has_supervisor' => $validated['has_supervisor'] ?? null,
+            'previous_vanquish_work' => $validated['previous_vanquish_work'] ?? null,
+            'areas_to_improve' => $validated['areas_to_improve'] ?? null,
+            'unique_trait' => $validated['unique_trait'] ?? null,
+            'counsellor_training_details' => $validated['counsellor_training_details'] ?? null,
+            'qualified_to_work_with' => $validated['qualified_to_work_with'] ?? [],
+            'challenging_cases' => $validated['challenging_cases'] ?? null,
+            'qualification_document' => $validated['qualification_document'] ?? null,
+            'dbs_certificate_qualified' => $validated['dbs_certificate_qualified'] ?? null,
+            'insurance_qualified' => $validated['insurance_qualified'] ?? null,
+            'self_employment_proof' => $validated['self_employment_proof'] ?? null,
+            'professional_membership' => $validated['professional_membership'] ?? null,
+            'signature' => $validated['signature'],
+            'signature_date' => $validated['signature_date'],
+            'gender' => $validated['gender'] ?? null,
+            'ethnicity' => $validated['ethnicity'] ?? null,
+            'sexual_orientation' => $validated['sexual_orientation'] ?? null,
+            'date_of_birth' => $validated['date_of_birth'] ?? null,
+            'modalities' => is_array($validated['modalities'] ?? null) ? implode(', ', $validated['modalities']) : ($validated['modalities'] ?? null),
+            'experience_areas' => $validated['experience_areas'] ?? null,
+            'availability' => $validated['availability'] ?? null,
+            'raw_submission' => $validated,
+        ]);
+
+        // 3. If no existing TC found by tc_id, check for an ACTIVE (non-archived, non-deleted) TC with this email
+        // IMPORTANT: Archived/soft-deleted records are NEVER auto-restored or merged!
+        if (!$tc && !empty($normalizedEmail)) {
+            $tc = TrainingCounsellor::whereNull('archived_at')
+                ->where('email', $normalizedEmail)
+                ->first();
         }
 
         $formFields = [
+            'person_id' => $person->id,
+            'name' => $fullName,
             'legal_first_name' => $validated['legal_first_name'],
             'legal_last_name' => $validated['legal_last_name'],
             'registered_address' => $validated['registered_address'],
@@ -980,7 +1025,7 @@ class TrainingCounsellorController extends Controller
         }
 
         if ($tc) {
-            // Updating existing counsellor
+            // Updating existing active counsellor
             if (str_starts_with($tc->tc_id ?? '', 'TC')) {
                 $maxQc = TrainingCounsellor::withTrashed()
                     ->where('tc_id', 'LIKE', 'QC%')
@@ -999,6 +1044,16 @@ class TrainingCounsellorController extends Controller
 
             $tc->update($formFields);
 
+            // Ensure portal user account matches the active counsellor
+            $user = User::where('email', $tc->email)->first();
+            if ($user) {
+                $user->update([
+                    'name' => $tc->name,
+                    'role' => 'counsellor',
+                    'training_counsellor_id' => $tc->id,
+                ]);
+            }
+
             ActivityLog::create([
                 'user_id' => $request->user()->id ?? null,
                 'action' => 'qualified_form_submitted',
@@ -1008,7 +1063,7 @@ class TrainingCounsellorController extends Controller
                 'ip_address' => $request->ip(),
             ]);
         } else {
-            // Creating brand new Qualified Counsellor onboarding record
+            // Creating brand new Qualified Counsellor record
             $maxQc = TrainingCounsellor::withTrashed()
                 ->where('tc_id', 'LIKE', 'QC%')
                 ->get()
@@ -1019,14 +1074,13 @@ class TrainingCounsellorController extends Controller
             $nextQc = max(1, ($maxQc ?? 0) + 1);
             $qcId = 'QC' . str_pad($nextQc, 3, '0', STR_PAD_LEFT);
 
-            $fullName = trim($validated['legal_first_name'] . ' ' . $validated['legal_last_name']);
             $fullAddress = trim($validated['registered_address'] . ', ' . $validated['registered_city'] . ' ' . $validated['registered_postcode']);
 
             $newRecord = array_merge($formFields, [
                 'uuid' => \Illuminate\Support\Str::uuid()->toString(),
                 'tc_id' => $qcId,
                 'name' => $fullName,
-                'email' => strtolower(trim($validated['email'])),
+                'email' => $normalizedEmail,
                 'phone' => $validated['phone'] ?? null,
                 'address' => $fullAddress,
                 'status' => 'Active',
@@ -1046,8 +1100,9 @@ class TrainingCounsellorController extends Controller
                     'role' => 'counsellor',
                     'training_counsellor_id' => $tc->id,
                 ]);
-            } elseif (!$user->training_counsellor_id) {
+            } else {
                 $user->update([
+                    'name' => $tc->name,
                     'role' => 'counsellor',
                     'training_counsellor_id' => $tc->id,
                 ]);
@@ -1063,33 +1118,34 @@ class TrainingCounsellorController extends Controller
             ]);
         }
 
-        // Send confirmation email to counsellor
-        if (!empty($tc->email)) {
+        // Send confirmation email to counsellor (guaranteed to reflect current applicant's name)
+        if (!empty($normalizedEmail)) {
             try {
-                $counsellorName = $tc->name ?: trim($validated['legal_first_name'] . ' ' . $validated['legal_last_name']);
+                $counsellorName = $fullName;
                 $firstName = !empty($validated['legal_first_name']) ? $validated['legal_first_name'] : explode(' ', $counsellorName)[0];
                 $submissionDate = now()->format('d M Y, H:i T');
 
                 app(\App\Services\EmailService::class)->sendAndLog(
-                    $tc->email,
+                    $normalizedEmail,
                     'qualified_counsellor_submission',
                     [
                         'first_name' => $firstName,
                         'counsellor_name' => $counsellorName,
-                        'email' => $tc->email,
+                        'email' => $normalizedEmail,
                         'tc_id' => $tc->tc_id ?? 'Pending',
                         'submission_date' => $submissionDate,
                     ],
                     $tc
                 );
             } catch (\Throwable $e) {
-                Log::error("Failed to send qualified counsellor submission confirmation email to {$tc->email}: " . $e->getMessage());
+                Log::error("Failed to send qualified counsellor submission confirmation email to {$normalizedEmail}: " . $e->getMessage());
             }
         }
 
         return response()->json([
             'message' => 'Qualified Counsellor form submitted successfully',
             'tc' => $tc,
+            'application_id' => $qcApp->id,
         ]);
     }
 
