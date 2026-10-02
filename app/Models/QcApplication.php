@@ -48,6 +48,9 @@ class QcApplication extends Model
             if (!empty($app->email)) {
                 $app->email = strtolower(trim($app->email));
             }
+            if (empty($app->name)) {
+                $app->name = trim(($app->legal_first_name ?? '') . ' ' . ($app->legal_last_name ?? ''));
+            }
         });
     }
 

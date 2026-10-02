@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Client;
+use App\Models\Person;
 use App\Models\ClientTcMatch;
 use App\Models\ActivityLog;
 use App\Models\Consultation;
@@ -48,7 +49,19 @@ class ClientController extends Controller
 
         // Filters - validate enum values
         if ($request->has('stage') && $request->stage !== 'all') {
-            $validStages = ['Application & Assessment form Submitted', 'Consultation Booked', 'Consultation Completed', 'Matched with TC', 'Agreement Sent', 'Agreement Signed', 'Sessions Bookable', 'Active Therapy'];
+            $validStages = [
+                'Consultation Booked',
+                'Consultation Completed',
+                'Agreement Sent',
+                'Agreement Signed',
+                'Matched with counsellor',
+                'Matched With Counsellor',
+                'Matched with TC',
+                'Sessions Booked',
+                'Sessions Bookable',
+                'Active Therapy',
+                'Application & Assessment form Submitted'
+            ];
             if (in_array($request->stage, $validStages)) {
                 $query->where('stage', $request->stage);
             }
@@ -161,6 +174,11 @@ class ClientController extends Controller
         $validated['client_id'] = Client::generateNextClientId();
         $validated['submitted_date'] = now();
 
+        $normalizedEmail = strtolower(trim($validated['email']));
+        $person = Person::findOrCreateByEmail($normalizedEmail, $validated['name'], $validated['phone'] ?? null);
+        $validated['person_id'] = $person->id;
+        $validated['email'] = $normalizedEmail;
+
         $client = Client::create($validated);
 
         // Log activity
@@ -252,11 +270,22 @@ class ClientController extends Controller
             $client->emergency_contact_relationship = $client->emergency_contact_relationship ?: $intake->emergency_contact_relationship;
         }
 
-        // Load other cases belonging to the same person (same email)
-        if (!empty($client->email)) {
-            $relatedCases = Client::where('email', $client->email)
+        // Load other cases belonging to the same person (person_id or email, including archived)
+        $normalizedEmail = strtolower(trim($client->email ?? ''));
+        $historyQuery = function ($q) use ($client, $normalizedEmail) {
+            if ($client->person_id) {
+                $q->where('person_id', $client->person_id);
+            }
+            if ($normalizedEmail) {
+                $q->orWhere('email', $normalizedEmail);
+            }
+        };
+
+        if ($client->person_id || !empty($normalizedEmail)) {
+            $relatedCases = Client::withTrashed()
                 ->where('id', '!=', $client->id)
-                ->select(['id', 'uuid', 'client_id', 'name', 'email', 'stage', 'status', 'service_type', 'submitted_date', 'created_at'])
+                ->where($historyQuery)
+                ->select(['id', 'uuid', 'client_id', 'name', 'email', 'stage', 'status', 'service_type', 'submitted_date', 'archived_at', 'deleted_at', 'created_at'])
                 ->orderBy('id', 'desc')
                 ->get();
             $client->setAttribute('related_cases', $relatedCases);
@@ -370,40 +399,33 @@ class ClientController extends Controller
             return response()->json(['message' => 'Unauthorized. Only admins can delete clients.'], 403);
         }
 
-        // Clean up linked consultations and release any booked slots
+        // Release any booked consultation slots so capacity is returned
         foreach ($client->consultations as $consultation) {
             if ($consultation->consultation_slot_id) {
                 ConsultationSlot::where('id', $consultation->consultation_slot_id)
                     ->where('booked_slots', '>', 0)
                     ->decrement('booked_slots');
             }
-            $consultation->delete();
         }
 
-        // Clean up associated sessions, matches, intake forms
-        $client->sessions()->delete();
-        $client->matches()->delete();
-        $client->intakeForm()->delete();
-
-        // Permanently remove client so no orphaned records or soft-delete ghosts remain
+        // Archive the client: preserve records in history, never hard-delete!
         $clientName = $client->name;
         $clientId = $client->id;
-        $client->forceDelete();
+        $client->archived_at = now();
+        $client->status = 'Archived';
+        $client->save();
+        $client->delete(); // Soft delete
 
-        // Also purge any orphaned consultations whose client no longer exists
-        Consultation::whereDoesntHave('client')->delete();
-
-        // Log activity (using pre-stored values since client is now deleted)
         ActivityLog::create([
             'user_id' => $request->user()->id,
-            'action' => 'client_deleted',
+            'action' => 'client_archived',
             'model_type' => Client::class,
             'model_id' => $clientId,
-            'description' => "Client {$clientName} deleted",
+            'description' => "Client {$clientName} ({$client->client_id}) archived",
             'ip_address' => $request->ip(),
         ]);
 
-        return response()->json(['message' => 'Client deleted successfully']);
+        return response()->json(['message' => 'Client archived successfully']);
     }
 
     public function details(Request $request, $id)
@@ -447,7 +469,7 @@ class ClientController extends Controller
         }
 
         $request->validate([
-            'stage' => 'required|in:Application & Assessment form Submitted,Consultation Booked,Consultation Completed,Matched with TC,Agreement Sent,Agreement Signed,Sessions Bookable,Active Therapy',
+            'stage' => 'required|in:Consultation Booked,Consultation Completed,Agreement Sent,Agreement Signed,Matched with counsellor,Matched With Counsellor,Matched with TC,Sessions Booked,Sessions Bookable,Active Therapy,Application & Assessment form Submitted',
         ]);
 
         $oldStage = $client->stage;

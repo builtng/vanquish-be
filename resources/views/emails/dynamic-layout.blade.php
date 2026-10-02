@@ -40,7 +40,7 @@
                     <!-- Footer -->
                     <tr>
                         <td style="background: linear-gradient(to bottom, #f9fafb, #f3f4f6); padding: 32px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
-                            <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 13px; line-height: 1.5;">This is an automated email from Vanquish Therapies. Please do not reply to this message.</p>
+                            <p style="margin: 0 0 8px 0; color: #4b5563; font-size: 13px; line-height: 1.5;">Need help or have questions? Contact our support team at <a href="mailto:help@vanquishtherapies.co.uk" style="color: #6f1d56; text-decoration: underline; font-weight: 600;">help@vanquishtherapies.co.uk</a></p>
                             <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">© {{ date('Y') }} Vanquish Therapies. All rights reserved.</p>
                         </td>
                     </tr>

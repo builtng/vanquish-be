@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\ActivityLog;
 use App\Models\TraineeApplication;
+use App\Models\Person;
 use App\Mail\DynamicEmail;
 use App\Jobs\SendTraineeStageTwoInvite;
 use Illuminate\Http\Request;
@@ -766,14 +767,18 @@ class JotFormWebhookController extends Controller
                 ]),
             ];
 
-            // Remove nulls so updateOrCreate won't blank out existing values
+            // Remove nulls so blank values don't overwrite defaults
             $mappedData = array_filter($mappedData, fn ($v) => $v !== null && $v !== '');
 
-            // Duplicate prevention: Update if exists, Create if not
-            $application = TraineeApplication::updateOrCreate(
-                ['email' => $email],
-                $mappedData
-            );
+            $normalizedEmail = strtolower(trim($email));
+            $applicantName = trim(($mappedData['first_name'] ?? '') . ' ' . ($mappedData['last_name'] ?? ''));
+            $person = Person::findOrCreateByEmail($normalizedEmail, $applicantName, $mappedData['phone'] ?? null);
+
+            $mappedData['person_id'] = $person->id;
+            $mappedData['email'] = $normalizedEmail;
+
+            // Every submission is stored as its OWN separate record with unique ID
+            $application = TraineeApplication::create($mappedData);
 
             // Log activity
             ActivityLog::create([

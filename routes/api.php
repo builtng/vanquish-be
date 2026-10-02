@@ -36,6 +36,8 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('throttle:5,1')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->name('login');
     Route::post('/register', [AuthController::class, 'register'])->middleware('maintenance');
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
 // Service routes (public)
@@ -103,10 +105,12 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/client-agreement/submit', [ClientAgreementController::class, 'submitAgreement']);
     Route::get('/client-agreement/download/{uuid}', [ClientAgreementController::class, 'downloadAgreementPdf']);
     Route::post('/trainee-application/submit', [TraineeApplicationController::class, 'store']);
+    Route::post('/trainee-applications', [TraineeApplicationController::class, 'store']);
     Route::post('/trainee-application/stage-two-submission', [TraineeApplicationController::class, 'handleStageTwoSubmission']);
     Route::get('/trainee-interview/slots', [TraineeApplicationController::class, 'getAvailableInterviewSlots']);
     Route::post('/trainee-interview/book', [TraineeApplicationController::class, 'bookInterview']);
     Route::post('/qualified-counsellor/submit', [TrainingCounsellorController::class, 'submitQualifiedForm']);
+    Route::post('/submit-qualified-form', [TrainingCounsellorController::class, 'submitQualifiedForm']);
     Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument']);
     Route::get('/qualified-counsellor/prefill/{uuid}', [TrainingCounsellorController::class, 'publicPrefill']);
 });
@@ -219,10 +223,8 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/pending-matches/count', [ClientController::class, 'pendingMatchesCount']);
         Route::post('/matches', [ClientController::class, 'assignMatch']);
         Route::post('/unassign-match', [ClientController::class, 'unassignMatch']);
+        Route::get('/matching-algorithm-settings', [MatchingAlgorithmSettingController::class, 'index']);
     });
-
-    // Matching Algorithm Settings (readable by any authenticated user)
-    Route::get('/matching-algorithm-settings', [MatchingAlgorithmSettingController::class, 'index']);
 
     // Activity Logs (staff and admin only)
     Route::middleware('staff')->group(function () {
@@ -256,12 +258,18 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::put('/email-templates/{type}', [EmailTemplateController::class, 'update']);
         Route::post('/email-templates/{type}/reset', [EmailTemplateController::class, 'reset']);
 
+        // Email Delivery Logs
+        Route::get('/email-logs', [\App\Http\Controllers\Api\EmailLogController::class, 'index']);
+        Route::get('/email-logs/{id}', [\App\Http\Controllers\Api\EmailLogController::class, 'show']);
+        Route::post('/email-logs/{id}/resend', [\App\Http\Controllers\Api\EmailLogController::class, 'resend']);
+
         // Email Sender Settings
         Route::prefix('admin')->group(function () {
             Route::apiResource('email-senders', \App\Http\Controllers\Admin\EmailSenderSettingController::class)->except(['show']);
         });
 
         Route::apiResource('users', UserController::class);
+        Route::put('/users/{id}/toggle-active', [UserController::class, 'toggleActive']);
         Route::get('/users-count', [UserController::class, 'count']);
 
         // Menu Privileges
@@ -392,12 +400,14 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     Route::post('/session-notes', [SessionNoteController::class, 'store']);
     Route::get('/session-notes/{id}', [SessionNoteController::class, 'show']);
 
-    // Staff Notes
-    Route::prefix('staff-notes')->group(function () {
-        Route::get('/', [StaffNoteController::class, 'index']);
-        Route::post('/', [StaffNoteController::class, 'store']);
-        Route::get('/unread', [StaffNoteController::class, 'getUnreadNotes']);
-        Route::post('/{id}/read', [StaffNoteController::class, 'markAsRead']);
+    // Staff Notes (staff and admin only)
+    Route::middleware('staff')->group(function () {
+        Route::prefix('staff-notes')->group(function () {
+            Route::get('/', [StaffNoteController::class, 'index']);
+            Route::post('/', [StaffNoteController::class, 'store']);
+            Route::get('/unread', [StaffNoteController::class, 'getUnreadNotes']);
+            Route::post('/{id}/read', [StaffNoteController::class, 'markAsRead']);
+        });
     });
 
     // Broadcasting auth (for private channels via Laravel Echo)

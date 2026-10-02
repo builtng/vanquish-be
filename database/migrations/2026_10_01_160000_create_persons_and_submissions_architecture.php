@@ -95,7 +95,7 @@ return new class extends Migration
                 $table->unsignedBigInteger('training_counsellor_id')->nullable()->index();
                 $table->string('legal_first_name');
                 $table->string('legal_last_name');
-                $table->string('name');
+                $table->string('name')->nullable();
                 $table->string('email')->index();
                 $table->string('phone')->nullable();
                 $table->string('status')->default('New Application');

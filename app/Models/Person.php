@@ -40,9 +40,20 @@ class Person extends Model
     /**
      * Get or create a person identity by email safely.
      */
-    public static function findOrCreateByEmail(string $email, array $attributes = []): self
+    public static function findOrCreateByEmail(string $email, array|string $attributes = [], ?string $phone = null): self
     {
         $normalized = strtolower(trim($email));
+
+        if (is_string($attributes)) {
+            $name = trim($attributes);
+            $nameParts = explode(' ', $name, 2);
+            $attributes = [
+                'name' => $name,
+                'first_name' => $nameParts[0] ?? null,
+                'last_name' => $nameParts[1] ?? null,
+                'phone' => $phone,
+            ];
+        }
 
         $person = static::where('email', $normalized)->first();
 

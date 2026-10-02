@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\TraineeApplication;
 use App\Models\TraineeApplicationSetting;
 use App\Models\TrainingCounsellor;
+use App\Models\Person;
 use App\Models\User;
 use App\Models\ActivityLog;
 use App\Models\ConsultationSlot;
@@ -81,14 +82,19 @@ class TraineeApplicationController extends Controller
             'experience_background' => 'nullable|string',
         ]);
 
+        $normalizedEmail = strtolower(trim($validated['email']));
+        $fullName = trim($validated['first_name'] . ' ' . $validated['last_name']);
+
+        // Find or create permanent Person identity
+        $person = Person::findOrCreateByEmail($normalizedEmail, $fullName, $validated['phone'] ?? null);
+
+        $validated['person_id'] = $person->id;
+        $validated['email'] = $normalizedEmail;
         $validated['source'] = 'internal_form';
         $validated['status'] = 'New Application';
 
-        // duplicate prevention: update if exists
-        $application = TraineeApplication::updateOrCreate(
-            ['email' => $validated['email']],
-            $validated
-        );
+        // Every submission is stored as its OWN separate record with unique ID
+        $application = TraineeApplication::create($validated);
 
         ActivityLog::create([
             'user_id' => $request->user()->id ?? null,
@@ -148,6 +154,21 @@ class TraineeApplicationController extends Controller
      */
     public function show(TraineeApplication $traineeApplication)
     {
+        $normalizedEmail = strtolower(trim($traineeApplication->email));
+        $previousSubmissions = TraineeApplication::where('id', '!=', $traineeApplication->id)
+            ->where(function ($q) use ($traineeApplication, $normalizedEmail) {
+                if ($traineeApplication->person_id) {
+                    $q->where('person_id', $traineeApplication->person_id);
+                }
+                if ($normalizedEmail) {
+                    $q->orWhere('email', $normalizedEmail);
+                }
+            })
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $traineeApplication->setAttribute('previous_submissions', $previousSubmissions);
+
         return response()->json($traineeApplication);
     }
 
@@ -285,8 +306,20 @@ class TraineeApplicationController extends Controller
      */
     public function destroy(TraineeApplication $traineeApplication)
     {
+        $traineeApplication->archived_at = now();
+        $traineeApplication->save();
         $traineeApplication->delete();
-        return response()->json(['message' => 'Application deleted successfully']);
+
+        ActivityLog::create([
+            'user_id' => request()->user()->id ?? null,
+            'action' => 'trainee_application_archived',
+            'model_type' => TraineeApplication::class,
+            'model_id' => $traineeApplication->id,
+            'description' => "Trainee application archived for {$traineeApplication->first_name} {$traineeApplication->last_name}",
+            'ip_address' => request()->ip(),
+        ]);
+
+        return response()->json(['message' => 'Application archived successfully']);
     }
 
     /**

@@ -935,6 +935,7 @@ class TrainingCounsellorController extends Controller
         // 2. Always record each submission as its OWN separate, immutable QcApplication record
         $qcApp = QcApplication::create([
             'person_id' => $person->id,
+            'name' => $fullName,
             'legal_first_name' => $validated['legal_first_name'],
             'legal_last_name' => $validated['legal_last_name'],
             'email' => $normalizedEmail,
@@ -963,6 +964,7 @@ class TrainingCounsellorController extends Controller
             'modalities' => is_array($validated['modalities'] ?? null) ? implode(', ', $validated['modalities']) : ($validated['modalities'] ?? null),
             'experience_areas' => $validated['experience_areas'] ?? null,
             'availability' => $validated['availability'] ?? null,
+            'answers' => $validated,
             'raw_submission' => $validated,
         ]);
 
