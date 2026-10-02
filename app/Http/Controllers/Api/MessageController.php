@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Mail;
 use App\Mail\DynamicEmail;
 use App\Events\MessageSent;
 use App\Events\MessageRead;
+use App\Models\EmailLog;
+use Illuminate\Support\Facades\Cache;
 
 class MessageController extends Controller
 {
@@ -435,23 +437,34 @@ class MessageController extends Controller
 
                 // Send email alert notifying counsellor that a message is waiting (no message content for privacy)
                 $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
+                $loginUrl = $baseUrl . '/counsellor-login';
                 $portalUrl = $baseUrl . '/counsellor-portal/messages';
+                $conversationKey = "tc_{$tc->id}";
+
                 $counsellorEmails = array_filter(array_unique([$tc->email, $tc->user?->email]));
                 foreach ($counsellorEmails as $email) {
-                    app(\App\Services\EmailService::class)->sendAndLog(
-                        $email,
-                        'message_waiting_counsellor',
-                        [
-                            'tc_name' => $tc->name,
-                            'portal_url' => $portalUrl,
-                        ]
-                    );
+                    if ($this->shouldSendNotificationEmail($email, $conversationKey)) {
+                        $sent = app(\App\Services\EmailService::class)->sendAndLog(
+                            $email,
+                            'message_waiting_counsellor',
+                            [
+                                'tc_name' => $tc->name,
+                                'login_url' => $loginUrl,
+                                'portal_url' => $portalUrl,
+                                'conversation_key' => $conversationKey,
+                            ]
+                        );
+                        if ($sent) {
+                            $this->markNotificationEmailSent($email, $conversationKey);
+                        }
+                    }
                 }
             }
 
             // Also create records for CC users so it shows in their inbox
             $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
             $dashboardUrl = $baseUrl . '/dashboard/messages';
+            $loginUrl = $baseUrl . '/login';
             foreach ($ccUsers as $ccUserId) {
                 $ccUser = \App\Models\User::find($ccUserId);
                 if ($ccUser && !in_array($ccUserId, array_column($messages, 'to_user_id'))) {
@@ -471,15 +484,24 @@ class MessageController extends Controller
                     ]);
 
                     if ($ccUser->email) {
-                        app(\App\Services\EmailService::class)->sendAndLog(
-                            $ccUser->email,
-                            'message_waiting_admin',
-                            [
-                                'recipient_name' => $ccUser->name,
-                                'sender_name'    => $user->name,
-                                'dashboard_url'  => $dashboardUrl,
-                            ]
-                        );
+                        $firstTcId = count($recipientTcIds) > 0 ? $recipientTcIds[0] : 0;
+                        $conversationKey = "tc_{$firstTcId}_cc_{$ccUser->id}";
+                        if ($this->shouldSendNotificationEmail($ccUser->email, $conversationKey)) {
+                            $sent = app(\App\Services\EmailService::class)->sendAndLog(
+                                $ccUser->email,
+                                'message_waiting_admin',
+                                [
+                                    'recipient_name' => $ccUser->name,
+                                    'sender_name'    => $user->name,
+                                    'login_url'      => $loginUrl,
+                                    'dashboard_url'  => $dashboardUrl,
+                                    'conversation_key' => $conversationKey,
+                                ]
+                            );
+                            if ($sent) {
+                                $this->markNotificationEmailSent($ccUser->email, $conversationKey);
+                            }
+                        }
                     }
                 }
             }
@@ -572,21 +594,32 @@ class MessageController extends Controller
 
             // Send email alert to admins notifying that a message is waiting (no message content for privacy)
             $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
+            $loginUrl = $baseUrl . '/login';
             $dashboardUrl = $baseUrl . '/dashboard/messages';
+            $counsellorKey = $user->training_counsellor_id ?? $user->id;
+            $conversationKey = "admin_group_tc_{$counsellorKey}";
+
             $adminUsers = \App\Models\User::whereIn('role', ['super_admin', 'admin'])->get();
             $adminEmailsSent = [];
             foreach ($adminUsers as $adminUser) {
                 if ($adminUser->email && !isset($adminEmailsSent[$adminUser->email])) {
                     $adminEmailsSent[$adminUser->email] = true;
-                    app(\App\Services\EmailService::class)->sendAndLog(
-                        $adminUser->email,
-                        'message_waiting_admin',
-                        [
-                            'recipient_name' => $adminUser->name,
-                            'sender_name'    => $user->name,
-                            'dashboard_url'  => $dashboardUrl,
-                        ]
-                    );
+                    if ($this->shouldSendNotificationEmail($adminUser->email, $conversationKey)) {
+                        $sent = app(\App\Services\EmailService::class)->sendAndLog(
+                            $adminUser->email,
+                            'message_waiting_admin',
+                            [
+                                'recipient_name' => $adminUser->name,
+                                'sender_name'    => $user->name,
+                                'login_url'      => $loginUrl,
+                                'dashboard_url'  => $dashboardUrl,
+                                'conversation_key' => $conversationKey,
+                            ]
+                        );
+                        if ($sent) {
+                            $this->markNotificationEmailSent($adminUser->email, $conversationKey);
+                        }
+                    }
                 }
             }
 
@@ -667,27 +700,48 @@ class MessageController extends Controller
                     $targetUser->email
                 ]));
                 $portalUrl = $baseUrl . '/counsellor-portal/messages';
+                $loginUrl = $baseUrl . '/counsellor-login';
+                $tcId = $targetUser->training_counsellor_id ?? $targetUser->id;
+                $conversationKey = "tc_{$tcId}";
+
                 foreach ($counsellorEmails as $email) {
-                    app(\App\Services\EmailService::class)->sendAndLog(
-                        $email,
-                        'message_waiting_counsellor',
-                        [
-                            'tc_name' => $targetUser->name,
-                            'portal_url' => $portalUrl,
-                        ]
-                    );
+                    if ($this->shouldSendNotificationEmail($email, $conversationKey)) {
+                        $sent = app(\App\Services\EmailService::class)->sendAndLog(
+                            $email,
+                            'message_waiting_counsellor',
+                            [
+                                'tc_name' => $targetUser->name,
+                                'login_url' => $loginUrl,
+                                'portal_url' => $portalUrl,
+                                'conversation_key' => $conversationKey,
+                            ]
+                        );
+                        if ($sent) {
+                            $this->markNotificationEmailSent($email, $conversationKey);
+                        }
+                    }
                 }
             } else if ($targetUser->email) {
                 $dashboardUrl = $baseUrl . '/dashboard/messages';
-                app(\App\Services\EmailService::class)->sendAndLog(
-                    $targetUser->email,
-                    'message_waiting_admin',
-                    [
-                        'recipient_name' => $targetUser->name,
-                        'sender_name'    => $user->name,
-                        'dashboard_url'  => $dashboardUrl,
-                    ]
-                );
+                $loginUrl = $baseUrl . '/login';
+                $conversationKey = "user_direct_" . min($user->id, $targetUser->id) . "_" . max($user->id, $targetUser->id);
+
+                if ($this->shouldSendNotificationEmail($targetUser->email, $conversationKey)) {
+                    $sent = app(\App\Services\EmailService::class)->sendAndLog(
+                        $targetUser->email,
+                        'message_waiting_admin',
+                        [
+                            'recipient_name' => $targetUser->name,
+                            'sender_name'    => $user->name,
+                            'login_url'      => $loginUrl,
+                            'dashboard_url'  => $dashboardUrl,
+                            'conversation_key' => $conversationKey,
+                        ]
+                    );
+                    if ($sent) {
+                        $this->markNotificationEmailSent($targetUser->email, $conversationKey);
+                    }
+                }
             }
         }
 
@@ -730,6 +784,26 @@ class MessageController extends Controller
             event(new MessageRead($message));
         } catch (\Exception $e) {
             Log::error('Failed to broadcast message read event: ' . $e->getMessage());
+        }
+
+        // Reset conversation notification throttle for recipient upon reading
+        if ($user->email) {
+            $convKeys = [];
+            if ($user->isCounsellor() && $user->training_counsellor_id) {
+                $convKeys[] = "tc_{$user->training_counsellor_id}";
+                $convKeys[] = "admin_group_tc_{$user->training_counsellor_id}";
+            } else {
+                if ($message->to_user_id === $user->id) {
+                    $convKeys[] = "user_direct_" . min($message->from_user_id, $message->to_user_id) . "_" . max($message->from_user_id, $message->to_user_id);
+                }
+                if ($message->type === 'counsellor_to_staff') {
+                    $counsellorKey = $message->fromUser?->training_counsellor_id ?? $message->from_user_id;
+                    $convKeys[] = "admin_group_tc_{$counsellorKey}";
+                }
+            }
+            foreach ($convKeys as $k) {
+                Cache::forget("msg_notif_" . md5(strtolower(trim($user->email)) . "_{$k}"));
+            }
         }
 
         return response()->json(['message' => 'Message marked as read']);
@@ -980,5 +1054,37 @@ class MessageController extends Controller
             'message' => 'Conversation deleted successfully.',
             'count' => $count
         ]);
+    }
+
+    /**
+     * Determine if a notification email should be sent for a given conversation (15-min anti-flooding limit).
+     */
+    protected function shouldSendNotificationEmail(string $recipientEmail, string $conversationKey): bool
+    {
+        $cacheKey = "msg_notif_" . md5(strtolower(trim($recipientEmail)) . "_{$conversationKey}");
+        if (Cache::has($cacheKey)) {
+            return false;
+        }
+
+        // Also check recent EmailLog entries in the last 15 minutes as persistence check
+        $recentLog = EmailLog::where('email', $recipientEmail)
+            ->whereIn('template_name', ['message_waiting_counsellor', 'message_waiting_admin'])
+            ->where('created_at', '>=', now()->subMinutes(15))
+            ->where('status', '!=', 'failed')
+            ->get()
+            ->first(function ($log) use ($conversationKey) {
+                return isset($log->payload['conversation_key']) && $log->payload['conversation_key'] === $conversationKey;
+            });
+
+        return $recentLog === null;
+    }
+
+    /**
+     * Mark that a notification email was sent for a conversation.
+     */
+    protected function markNotificationEmailSent(string $recipientEmail, string $conversationKey): void
+    {
+        $cacheKey = "msg_notif_" . md5(strtolower(trim($recipientEmail)) . "_{$conversationKey}");
+        Cache::put($cacheKey, true, now()->addMinutes(15));
     }
 }
