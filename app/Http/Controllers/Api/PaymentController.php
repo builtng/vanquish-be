@@ -349,10 +349,23 @@ class PaymentController extends Controller
                                 $consultation
                             );
                         }
-                    } elseif ($paymentType === 'consultation' && !empty($validated['consultation_slot_id']) && isset($consultation)) {
-                        // One automatic email: booking confirmed with the
-                        // chosen date/time and Zoom details.
-                        $this->bookingService->finalize($client, (int) $validated['consultation_slot_id'], $consultation);
+                    } elseif ($paymentType === 'consultation') {
+                        $slotId = $validated['consultation_slot_id'] ?? $consultation?->consultation_slot_id;
+                        if (!$slotId && isset($intake) && $intake) {
+                            $slotId = $intake->consultation_slot_id ?? null;
+                        }
+
+                        if ($slotId && isset($consultation)) {
+                            // One automatic email: booking confirmed with the
+                            // chosen date/time and Zoom details.
+                            $this->bookingService->finalize($client, (int) $slotId, $consultation);
+                        } else {
+                            $emailService = new \App\Services\EmailService();
+                            $emailService->sendAndLog($client, 'payment_confirmation', [
+                                'client_name' => $client->name,
+                                'email' => $client->email
+                            ]);
+                        }
                     } else {
                         $emailService = new \App\Services\EmailService();
                         $emailService->sendAndLog($client, 'payment_confirmation', [
@@ -365,27 +378,26 @@ class PaymentController extends Controller
                 Log::error('Failed to send dynamic payment confirmation/booking email: ' . $e->getMessage());
             }
 
-            // Log activity (if user is authenticated)
-            if ($request->user()) {
-                if ($paymentType === 'consultation' && isset($consultation)) {
-                    ActivityLog::create([
-                        'user_id' => $request->user()->id,
-                        'action' => 'payment_completed',
-                        'model_type' => Consultation::class,
-                        'model_id' => $consultation->id,
-                        'description' => "Payment of £{$consultation->payment_amount} completed for consultation",
-                        'ip_address' => $request->ip(),
-                    ]);
-                } elseif (($paymentType === 'session' || $paymentType === 'session_block') && isset($sessions) && count($sessions) > 0) {
-                    ActivityLog::create([
-                        'user_id' => $request->user()->id,
-                        'action' => 'payment_completed',
-                        'model_type' => \App\Models\Session::class,
-                        'model_id' => $sessions[0]->id,
-                        'description' => "Payment of £" . ($paymentIntent->amount / 100) . " completed for session(s)",
-                        'ip_address' => $request->ip(),
-                    ]);
-                }
+            // Log activity (works for both authenticated admin and public clients)
+            $userId = $request->user()?->id;
+            if ($paymentType === 'consultation' && isset($consultation)) {
+                ActivityLog::create([
+                    'user_id' => $userId,
+                    'action' => 'payment_completed',
+                    'model_type' => Consultation::class,
+                    'model_id' => $consultation->id,
+                    'description' => "Payment of £{$consultation->payment_amount} completed for consultation",
+                    'ip_address' => $request->ip(),
+                ]);
+            } elseif (($paymentType === 'session' || $paymentType === 'session_block') && isset($sessions) && count($sessions) > 0) {
+                ActivityLog::create([
+                    'user_id' => $userId,
+                    'action' => 'payment_completed',
+                    'model_type' => \App\Models\Session::class,
+                    'model_id' => $sessions[0]->id,
+                    'description' => "Payment of £" . ($paymentIntent->amount / 100) . " completed for session(s)",
+                    'ip_address' => $request->ip(),
+                ]);
             }
 
             if ($paymentType === 'consultation' && isset($consultation)) {
@@ -576,13 +588,18 @@ class PaymentController extends Controller
         $client = Client::find($clientId);
         if ($client) {
             $slotId = $paymentIntent->metadata->consultation_slot_id ?? null;
-            if ($paymentType === 'consultation' && $slotId && isset($consultation)) {
-                // One automatic email: booking confirmed with the chosen
-                // date/time and Zoom details. finalize() is idempotent, so
-                // if the direct /payments/confirm call already handled this
-                // (the common path — the webhook is a fallback), this is a
-                // no-op and we never double-send.
-                $this->bookingService->finalize($client, (int) $slotId, $consultation);
+            if ($paymentType === 'consultation') {
+                if (!$slotId && isset($consultation) && $consultation->consultation_slot_id) {
+                    $slotId = $consultation->consultation_slot_id;
+                }
+                if ($slotId && isset($consultation)) {
+                    // One automatic email: booking confirmed with the chosen
+                    // date/time and Zoom details. finalize() is idempotent, so
+                    // if the direct /payments/confirm call already handled this
+                    // (the common path — the webhook is a fallback), this is a
+                    // no-op and we never double-send.
+                    $this->bookingService->finalize($client, (int) $slotId, $consultation);
+                }
             } else {
                 $emailService = app(\App\Services\EmailService::class);
                 $emailService->sendAndLog($client, 'payment_confirmation', [

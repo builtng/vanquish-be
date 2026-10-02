@@ -46,25 +46,45 @@ class ConsultationBookingService
                     ?? Consultation::where('client_id', $client->id)->latest()->lockForUpdate()->first());
 
             if (!$target) {
-                Log::warning('ConsultationBookingService: no consultation found for client', [
+                $target = Consultation::create([
+                    'consultation_id' => Consultation::generateNextConsultationId(),
                     'client_id' => $client->id,
+                    'consultation_slot_id' => $slot->id,
+                    'scheduled_at' => $slot->consultation_datetime,
+                    'status' => 'scheduled',
+                    'payment_status' => 'paid',
                 ]);
-                return;
-            }
+            } else {
+                // Already finalized with this slot (e.g. webhook fired after direct confirm
+                // already booked the slot) — skip so we never double-send.
+                if ($target->consultation_slot_id === $slot->id && $target->status === 'scheduled') {
+                    return;
+                }
 
-            // Already finalized (e.g. webhook fired after the direct confirm
-            // already booked the slot) — skip so we never double-send.
-            if ($target->consultation_slot_id) {
-                return;
+                $target->update([
+                    'consultation_slot_id' => $slot->id,
+                    'scheduled_at' => $slot->consultation_datetime,
+                    'status' => 'scheduled',
+                    'payment_status' => 'paid',
+                ]);
             }
-
-            $target->update([
-                'consultation_slot_id' => $slot->id,
-                'scheduled_at' => $slot->consultation_datetime,
-                'status' => 'scheduled',
-            ]);
 
             $client->update(['stage' => 'Consultation Booked']);
+
+            // Create admin notification activity log
+            \App\Models\ActivityLog::create([
+                'user_id' => null,
+                'action' => 'consultation_booked',
+                'model_type' => Consultation::class,
+                'model_id' => $target->id,
+                'description' => "{$client->name} booked a consultation for " . Carbon::parse($slot->consultation_datetime)->format('l, M j, Y g:i A'),
+                'changes' => [
+                    'client_id' => $client->id,
+                    'client_name' => $client->name,
+                    'scheduled_at' => $slot->consultation_datetime,
+                    'slot_id' => $slot->id,
+                ],
+            ]);
 
             $duration = (int) (DB::table('company_settings')->where('key', 'consultation_duration_minutes')->value('value') ?: 15);
             $zoomLink = DB::table('company_settings')->where('key', 'consultation_zoom_link')->value('value') ?: '';
@@ -86,6 +106,7 @@ class ConsultationBookingService
                     'zoom_link' => $zoomLink,
                     'meeting_id' => $meetingId,
                     'passcode' => $passcode,
+                    'support_email' => 'help@vanquishtherapies.co.uk',
                 ]
             );
         });
@@ -109,52 +130,86 @@ class ConsultationBookingService
                     ?? Consultation::where('client_id', $client->id)->latest()->lockForUpdate()->first());
 
             if (!$target) {
-                Log::warning('ConsultationBookingService: no consultation found for client', [
+                $target = Consultation::create([
+                    'consultation_id' => Consultation::generateNextConsultationId(),
                     'client_id' => $client->id,
-                ]);
-                return;
-            }
-
-            // Already finalized (e.g. webhook fired after the direct confirm
-            // already booked the slot) — skip so we never double-send.
-            if ($target->tc_id || $target->consultation_slot_id) {
-                return;
-            }
-
-            $alreadyBooked = Consultation::where('tc_id', $tc->id)
-                ->where('scheduled_at', $scheduledAt)
-                ->whereIn('status', ['scheduled', 'completed'])
-                ->exists();
-
-            if ($alreadyBooked) {
-                Log::warning('ConsultationBookingService: counsellor consultation slot no longer available', [
                     'tc_id' => $tc->id,
-                    'scheduled_at' => $scheduledAt->toDateTimeString(),
+                    'scheduled_at' => $scheduledAt,
+                    'status' => 'scheduled',
+                    'payment_status' => 'paid',
+                    'is_fallback' => false,
                 ]);
-                return;
-            }
+            } else {
+                // Already finalized with this counsellor and time — skip double-sending.
+                if ($target->tc_id === $tc->id && $target->scheduled_at && Carbon::parse($target->scheduled_at)->eq($scheduledAt) && $target->status === 'scheduled') {
+                    return;
+                }
 
-            $target->update([
-                'tc_id' => $tc->id,
-                'scheduled_at' => $scheduledAt,
-                'status' => 'scheduled',
-                'is_fallback' => false,
-            ]);
+                $alreadyBooked = Consultation::where('tc_id', $tc->id)
+                    ->where('scheduled_at', $scheduledAt)
+                    ->whereIn('status', ['scheduled', 'completed'])
+                    ->where('id', '!=', $target->id)
+                    ->exists();
+
+                if ($alreadyBooked) {
+                    Log::warning('ConsultationBookingService: counsellor consultation slot no longer available', [
+                        'tc_id' => $tc->id,
+                        'scheduled_at' => $scheduledAt->toDateTimeString(),
+                    ]);
+                    return;
+                }
+
+                $target->update([
+                    'tc_id' => $tc->id,
+                    'scheduled_at' => $scheduledAt,
+                    'status' => 'scheduled',
+                    'payment_status' => 'paid',
+                    'is_fallback' => false,
+                ]);
+            }
 
             $client->update([
                 'stage' => 'Consultation Booked',
                 'preferred_tc_id' => $tc->id,
             ]);
 
+            // Create admin notification activity log
+            \App\Models\ActivityLog::create([
+                'user_id' => null,
+                'action' => 'consultation_booked',
+                'model_type' => Consultation::class,
+                'model_id' => $target->id,
+                'description' => "{$client->name} booked a consultation with {$tc->name} for " . $scheduledAt->format('l, M j, Y g:i A'),
+                'changes' => [
+                    'client_id' => $client->id,
+                    'client_name' => $client->name,
+                    'tc_id' => $tc->id,
+                    'scheduled_at' => $scheduledAt->toDateTimeString(),
+                ],
+            ]);
+
+            $duration = (int) (DB::table('company_settings')->where('key', 'consultation_duration_minutes')->value('value') ?: 15);
+            $zoomLink = DB::table('company_settings')->where('key', 'consultation_zoom_link')->value('value') ?: '';
+            $meetingId = DB::table('company_settings')->where('key', 'consultation_meeting_id')->value('value') ?: '';
+            $passcode = DB::table('company_settings')->where('key', 'consultation_passcode')->value('value') ?: '';
+
+            $slotStart = Carbon::parse($scheduledAt);
+            $slotEnd = $slotStart->copy()->addMinutes($duration);
+            $scheduleDatetime = $slotStart->format('l, M j, Y g:i A') . '-' . $slotEnd->format('g:i A');
+
             $this->emailService->sendAndLog(
                 $client,
                 'consultation_booking_confirmation',
                 [
                     'client_name' => $client->name,
-                    'schedule_datetime' => $scheduledAt->format('l, M j, Y g:i A'),
+                    'schedule_datetime' => $scheduleDatetime,
                     'timezone' => 'Europe/London',
-                    'duration' => 15,
+                    'duration' => $duration,
                     'counsellor_name' => $tc->name,
+                    'zoom_link' => $zoomLink,
+                    'meeting_id' => $meetingId,
+                    'passcode' => $passcode,
+                    'support_email' => 'help@vanquishtherapies.co.uk',
                 ]
             );
         });

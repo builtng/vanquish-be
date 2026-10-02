@@ -9,15 +9,17 @@ use App\Models\Client;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
-use App\Services\EmailService;
+use App\Services\ConsultationBookingService;
 
 class ClientConsultationSlotController extends Controller
 {
     protected $emailService;
+    protected ConsultationBookingService $bookingService;
 
-    public function __construct(EmailService $emailService)
+    public function __construct(EmailService $emailService, ConsultationBookingService $bookingService)
     {
         $this->emailService = $emailService;
+        $this->bookingService = $bookingService;
     }
 
     public function getAvailableSlots(Request $request)
@@ -76,8 +78,7 @@ class ClientConsultationSlotController extends Controller
                 return response()->json(['message' => 'You have already booked this slot.'], 400);
             }
 
-            // Verify payment
-            // We assume successful intake or payment creates a consultation with payment_status = paid
+            // Find existing consultation or let finalize create one
             $consultation = Consultation::where('client_id', $client->id)
                 ->whereNull('consultation_slot_id')
                 ->where(function ($query) {
@@ -87,59 +88,16 @@ class ClientConsultationSlotController extends Controller
                 ->latest()
                 ->first();
 
-            if (!$consultation) {
-                // If no consultation record exists, create one now
-                // This handles cases where intake was free/discounted or payment record sync issues
-                $consultation = Consultation::create([
-                    'consultation_id' => Consultation::generateNextConsultationId(),
-                    'client_id' => $client->id,
-                    'status' => 'scheduled',
-                    'payment_status' => 'paid', // Default to paid if we allow booking
-                    'scheduled_at' => $slot->consultation_datetime,
-                ]);
-            }
+            $this->bookingService->finalize($client, (int) $slot->id, $consultation);
 
-            // "Create booking" -> Update the existing paid consultation with the slot, and set it to scheduled
-            $consultation->update([
-                'consultation_slot_id' => $slot->id,
-                'scheduled_at' => $slot->consultation_datetime,
-                'status' => 'scheduled',
-            ]);
-
-            // Update client stage
-            $client->update(['stage' => 'Consultation Booked']);
-
-            // (Note: $slot->booked_slots and $slot->status are auto-updated by the Consultation model observer)
-
-            // Send confirmation email
-            if ($client->email) {
-                $duration = (int) (DB::table('company_settings')->where('key', 'consultation_duration_minutes')->value('value') ?: 15);
-                $zoomLink = DB::table('company_settings')->where('key', 'consultation_zoom_link')->value('value') ?: '';
-                $meetingId = DB::table('company_settings')->where('key', 'consultation_meeting_id')->value('value') ?: '';
-                $passcode = DB::table('company_settings')->where('key', 'consultation_passcode')->value('value') ?: '';
-
-                $slotStart = Carbon::parse($slot->consultation_datetime);
-                $slotEnd = $slotStart->copy()->addMinutes($duration);
-                $scheduleDatetime = $slotStart->format('l, M j, Y g:i A') . '-' . $slotEnd->format('g:i A');
-
-                $this->emailService->sendAndLog(
-                    $client,
-                    'consultation_booking_confirmation',
-                    [
-                        'client_name' => $client->name,
-                        'schedule_datetime' => $scheduleDatetime,
-                        'timezone' => 'Europe/London',
-                        'duration' => $duration,
-                        'zoom_link' => $zoomLink,
-                        'meeting_id' => $meetingId,
-                        'passcode' => $passcode,
-                    ]
-                );
-            }
+            $consultation = Consultation::where('client_id', $client->id)
+                ->where('consultation_slot_id', $slot->id)
+                ->latest()
+                ->first();
 
             return response()->json([
                 'message' => 'Consultation booked successfully',
-                'consultation' => $consultation->load(['consultationSlot'])
+                'consultation' => $consultation ? $consultation->load(['consultationSlot']) : null,
             ]);
         });
     }
