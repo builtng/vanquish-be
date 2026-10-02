@@ -222,11 +222,27 @@ class EmailService
             $email = (string) $recipient;
         }
 
+        $email = trim($email);
+
+        $submissionId = null;
+        if ($model instanceof \App\Models\Client) {
+            $submissionId = $model->id;
+        } elseif (is_object($model) && isset($model->id)) {
+            $submissionId = $model->id;
+        } elseif (isset($placeholders['submission_id'])) {
+            $submissionId = $placeholders['submission_id'];
+        } elseif (isset($placeholders['application_id'])) {
+            $submissionId = $placeholders['application_id'];
+        } elseif (isset($placeholders['client_id'])) {
+            $submissionId = $placeholders['client_id'];
+        }
+
         $logData = [
             'email' => $email,
             'template_name' => $templateName,
             'payload' => $placeholders,
             'status' => 'pending',
+            'submission_id' => $submissionId,
         ];
 
         if ($model instanceof \App\Models\Client) {
@@ -235,6 +251,15 @@ class EmailService
 
         $log = EmailLog::create($logData);
 
+        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $log->update([
+                'status' => 'failed',
+                'error_message' => empty($email) ? 'Recipient email address is missing' : "Invalid email address format: {$email}",
+            ]);
+            Log::warning("EmailService: Skipped sending {$templateName} due to invalid or missing email address: '{$email}'");
+            return false;
+        }
+
         $maxAttempts = 2;
         $attempt = 0;
         $lastError = null;
@@ -242,11 +267,16 @@ class EmailService
         while ($attempt < $maxAttempts) {
             $attempt++;
             try {
-                Mail::to($email)->send(new DynamicEmail($templateName, $placeholders));
+                $sent = Mail::to($email)->send(new DynamicEmail($templateName, $placeholders));
+                $messageId = null;
+                if ($sent instanceof \Illuminate\Mail\SentMessage) {
+                    $messageId = $sent->getMessageId();
+                }
 
                 $log->update([
                     'status' => 'sent',
                     'sent_at' => now(),
+                    'resend_message_id' => $messageId,
                     'error_message' => null,
                 ]);
 
@@ -254,7 +284,7 @@ class EmailService
             } catch (\Throwable $e) {
                 $lastError = $e->getMessage();
                 Log::warning("EmailService attempt {$attempt}/{$maxAttempts} failed for {$email} ({$templateName}): {$lastError}");
-                
+
                 if ($attempt < $maxAttempts) {
                     usleep(500000); // 0.5s pause before retry
                 }
@@ -277,22 +307,39 @@ class EmailService
     public function retry(EmailLog $log): bool
     {
         if (!$log->payload) {
-            $log->update(['error_message' => 'Cannot retry: payload missing']);
+            $log->update([
+                'status' => 'failed',
+                'error_message' => 'Cannot retry: payload missing',
+            ]);
+            return false;
+        }
+
+        if (empty($log->email) || !filter_var($log->email, FILTER_VALIDATE_EMAIL)) {
+            $log->update([
+                'status' => 'failed',
+                'error_message' => 'Cannot retry: invalid or missing recipient email address',
+            ]);
             return false;
         }
 
         try {
-            Mail::to($log->email)->send(new DynamicEmail($log->template_name, $log->payload));
+            $sent = Mail::to($log->email)->send(new DynamicEmail($log->template_name, $log->payload));
+            $messageId = null;
+            if ($sent instanceof \Illuminate\Mail\SentMessage) {
+                $messageId = $sent->getMessageId();
+            }
 
             $log->update([
                 'status' => 'sent',
                 'sent_at' => now(),
+                'resend_message_id' => $messageId ?: $log->resend_message_id,
                 'error_message' => null
             ]);
 
             return true;
         } catch (\Throwable $e) {
             $log->update([
+                'status' => 'failed',
                 'error_message' => 'Retry failed: ' . $e->getMessage()
             ]);
             return false;

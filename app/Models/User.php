@@ -26,6 +26,8 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'is_active',
+        'deactivated_at',
         'training_counsellor_id',
         'two_factor_enabled',
         'two_factor_secret',
@@ -55,10 +57,20 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
+            'deactivated_at' => 'datetime',
             'two_factor_enabled' => 'boolean',
             'two_factor_confirmed_at' => 'datetime',
             'two_factor_recovery_codes' => 'array',
         ];
+    }
+
+    /**
+     * Check if user is active
+     */
+    public function isActive(): bool
+    {
+        return (bool) $this->is_active && is_null($this->deactivated_at);
     }
 
     /**

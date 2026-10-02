@@ -42,6 +42,16 @@ class DynamicEmail extends Mailable
             }
         }
 
+        // Ensure login_url fallback is provided for message notifications
+        $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
+        if (!isset($data['login_url'])) {
+            if ($type === 'message_waiting_counsellor') {
+                $data['login_url'] = $data['portal_url'] ?? ($baseUrl . '/counsellor-login');
+            } elseif ($type === 'message_waiting_admin') {
+                $data['login_url'] = $data['dashboard_url'] ?? ($baseUrl . '/login');
+            }
+        }
+
         $this->data = $data;
     }
 
@@ -60,6 +70,7 @@ class DynamicEmail extends Mailable
 
         return new Envelope(
             from: new \Illuminate\Mail\Mailables\Address($sender['email'], $sender['name'] ?? config('mail.from.name')),
+            replyTo: [new \Illuminate\Mail\Mailables\Address('help@vanquishtherapies.co.uk', 'Vanquish Therapies Support')],
             subject: $subject,
         );
     }
@@ -102,6 +113,7 @@ class DynamicEmail extends Mailable
 
         $generalTypes = [
             'message_waiting_admin',
+            'password_reset',
         ];
 
         $consultationTypes = [
@@ -226,9 +238,14 @@ class DynamicEmail extends Mailable
     private function getDefaults()
     {
         return [
+            'password_reset' => [
+                'subject' => 'Password Reset Request - Vanquish Therapies',
+                'body' => '<h1 style="margin: 0 0 20px 0; color: #1e293b; font-size: 24px; font-weight: 700; line-height: 1.3;">Password Reset Request</h1><p style="font-size: 16px; margin: 0 0 16px 0; color: #333333;">Hello <strong>{{name}}</strong>,</p><p style="margin: 0 0 16px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your Vanquish Therapies account.</p><p style="margin: 24px 0;"><a href="{{reset_link}}" style="display:inline-block;padding:12px 24px;background-color:#6f1d56;color:white;text-decoration:none;border-radius:8px;font-weight:bold;">Reset My Password</a></p><p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px; line-height: 1.5;">This password reset link will expire in {{expires_in}}. If you did not request a password reset, no further action is required and your account remains secure.</p><p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 24px;">Warm regards,<br>The Vanquish Therapies Team</p>',
+                'placeholders' => ['name', 'reset_link', 'expires_in']
+            ],
             'intake_submission' => [
                 'subject' => 'We have received your intake form',
-                'body' => '<h1>Hello {{client_name}},</h1><p>Thank thank you for submitting your intake form. We will review it and get back to you soon.</p><p>Warm regards,<br>The Vanquish Therapies Team</p>',
+                'body' => '<h1>Hello {{client_name}},</h1><p>Thank you for submitting your intake form. We will review it and get back to you soon.</p><p>Warm regards,<br>The Vanquish Therapies Team</p>',
                 'placeholders' => ['client_name', 'email']
             ],
             'payment_confirmation' => [
@@ -431,14 +448,14 @@ class DynamicEmail extends Mailable
                 'placeholders' => ['tc_name', 'event_label', 'notes', 'logged_date']
             ],
             'message_waiting_counsellor' => [
-                'subject' => 'New message waiting in your Counsellor Portal',
-                'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;"><div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 32px; border-radius: 12px 12px 0 0; text-align: center;"><h1 style="color: white; margin: 0; font-size: 22px;">New Message Waiting</h1><p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 13px;">Vanquish Therapies — Practitioner Portal</p></div><div style="background: #ffffff; padding: 28px 32px; border: 1px solid #e8e8e8; border-top: none;"><p style="font-size: 15px; margin-top: 0;">Hi {{tc_name}},</p><p>You have a new message waiting in your Vanquish Therapies portal.</p><p style="background: #f9f4f8; border: 1px solid #e8d5e4; border-radius: 8px; padding: 14px 18px; font-size: 13px; color: #4a0d3a; line-height: 1.5;"><strong>Confidentiality Notice:</strong> To protect privacy and client confidentiality, message contents are not included in email alerts. Please access your secure portal to view and reply to your messages.</p><p style="margin-top: 28px; margin-bottom: 28px; text-align: center;"><a href="{{portal_url}}" style="display:inline-block;padding:12px 28px;background-color:#6f1d56;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;box-shadow: 0 2px 4px rgba(0,0,0,0.1);">Open Counsellor Portal</a></p><p style="font-size: 13px; color: #666; margin-top: 24px;">Warm regards,<br><strong style="color: #6f1d56;">The Vanquish Therapies Team</strong></p></div></div>',
-                'placeholders' => ['tc_name', 'portal_url']
+                'subject' => 'You have a new message',
+                'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;"><div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 32px; border-radius: 12px 12px 0 0; text-align: center;"><h1 style="color: white; margin: 0; font-size: 22px;">New Message Waiting</h1><p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 13px;">Vanquish Therapies — Practitioner Portal</p></div><div style="background: #ffffff; padding: 28px 32px; border: 1px solid #e8e8e8; border-top: none;"><p style="font-size: 15px; margin-top: 0;">Hi {{tc_name}},</p><p style="margin: 16px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">You have received a new message on the Vanquish Therapies system. For privacy, the message is not included in this email. Please log in to read it.</p><p style="margin-top: 28px; margin-bottom: 28px; text-align: center;"><a href="{{login_url}}" style="display:inline-block;padding:12px 28px;background-color:#6f1d56;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;box-shadow: 0 2px 4px rgba(0,0,0,0.1);">Log in to read your message</a></p><p style="font-size: 13px; color: #666; margin-top: 24px;">Warm regards,<br><strong style="color: #6f1d56;">The Vanquish Therapies Team</strong></p></div></div>',
+                'placeholders' => ['tc_name', 'login_url', 'portal_url']
             ],
             'message_waiting_admin' => [
-                'subject' => 'New message waiting in Admin Portal',
-                'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;"><div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 32px; border-radius: 12px 12px 0 0; text-align: center;"><h1 style="color: white; margin: 0; font-size: 22px;">New Internal Message</h1><p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 13px;">Vanquish Therapies — Admin Dashboard</p></div><div style="background: #ffffff; padding: 28px 32px; border: 1px solid #e8e8e8; border-top: none;"><p style="font-size: 15px; margin-top: 0;">Hi {{recipient_name}},</p><p>You have a new message waiting in the admin portal from <strong>{{sender_name}}</strong>.</p><p style="background: #f9f4f8; border: 1px solid #e8d5e4; border-radius: 8px; padding: 14px 18px; font-size: 13px; color: #4a0d3a; line-height: 1.5;"><strong>Confidentiality Notice:</strong> For data privacy and confidentiality, message contents are not transmitted via email. Please log in to your dashboard to review and reply.</p><p style="margin-top: 28px; margin-bottom: 28px; text-align: center;"><a href="{{dashboard_url}}" style="display:inline-block;padding:12px 28px;background-color:#6f1d56;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;box-shadow: 0 2px 4px rgba(0,0,0,0.1);">View Messages</a></p><p style="font-size: 13px; color: #666; margin-top: 24px;">Warm regards,<br><strong style="color: #6f1d56;">Vanquish Therapies System</strong></p></div></div>',
-                'placeholders' => ['recipient_name', 'sender_name', 'dashboard_url']
+                'subject' => 'You have a new message',
+                'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;"><div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 32px; border-radius: 12px 12px 0 0; text-align: center;"><h1 style="color: white; margin: 0; font-size: 22px;">New Internal Message</h1><p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 13px;">Vanquish Therapies — Admin Dashboard</p></div><div style="background: #ffffff; padding: 28px 32px; border: 1px solid #e8e8e8; border-top: none;"><p style="font-size: 15px; margin-top: 0;">Hi {{recipient_name}},</p><p style="margin: 16px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">You have received a new message on the Vanquish Therapies system. For privacy, the message is not included in this email. Please log in to read it.</p><p style="margin-top: 28px; margin-bottom: 28px; text-align: center;"><a href="{{login_url}}" style="display:inline-block;padding:12px 28px;background-color:#6f1d56;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;box-shadow: 0 2px 4px rgba(0,0,0,0.1);">Log in to read your message</a></p><p style="font-size: 13px; color: #666; margin-top: 24px;">Warm regards,<br><strong style="color: #6f1d56;">The Vanquish Therapies Team</strong></p></div></div>',
+                'placeholders' => ['recipient_name', 'sender_name', 'login_url', 'dashboard_url']
             ],
             'auto_deduction_applied' => [
                 'subject' => 'Booking Update - Auto-Deduction Applied',
