@@ -21,7 +21,7 @@ class UserController extends Controller
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
-        $users = User::select('id', 'name', 'email', 'role', 'two_factor_enabled', 'created_at', 'updated_at')
+        $users = User::select('id', 'name', 'email', 'role', 'is_active', 'deactivated_at', 'two_factor_enabled', 'created_at', 'updated_at')
             ->orderBy('id', 'desc')
             ->get();
 
@@ -44,7 +44,7 @@ class UserController extends Controller
             'password' => [
                 'required',
                 'string',
-                'min:8',
+                'min:12',
                 'confirmed',
                 'regex:/[a-z]/',
                 'regex:/[A-Z]/',
@@ -53,6 +53,7 @@ class UserController extends Controller
             'role' => 'required|string|in:admin,staff',
         ], [
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
+            'password.min' => 'Password must be at least 12 characters.',
         ]);
 
         $user = User::create([
@@ -60,6 +61,7 @@ class UserController extends Controller
             'email' => strtolower(trim($validated['email'])),
             'password' => Hash::make($validated['password']),
             'role' => $validated['role'],
+            'is_active' => true,
         ]);
 
         // Log activity
@@ -80,6 +82,7 @@ class UserController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
+                'is_active' => (bool) $user->is_active,
             ],
         ], 201);
     }
@@ -94,7 +97,7 @@ class UserController extends Controller
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
-        $user = User::select('id', 'name', 'email', 'role', 'two_factor_enabled', 'created_at', 'updated_at')
+        $user = User::select('id', 'name', 'email', 'role', 'is_active', 'deactivated_at', 'two_factor_enabled', 'created_at', 'updated_at')
             ->findOrFail($id);
 
         return response()->json($user);
@@ -119,7 +122,7 @@ class UserController extends Controller
             'password' => [
                 'sometimes',
                 'string',
-                'min:8',
+                'min:12',
                 'confirmed',
                 'regex:/[a-z]/',
                 'regex:/[A-Z]/',
@@ -127,6 +130,7 @@ class UserController extends Controller
             ],
         ], [
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
+            'password.min' => 'Password must be at least 12 characters.',
         ]);
 
         $oldData = [
@@ -161,6 +165,91 @@ class UserController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
+                'is_active' => (bool) $user->is_active,
+            ],
+        ]);
+    }
+
+    /**
+     * Toggle user active/deactivated status (admin only)
+     */
+    public function toggleActive(Request $request, $id)
+    {
+        if (!$request->user() || $request->user()->role !== 'admin') {
+            return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
+        }
+
+        $user = User::findOrFail($id);
+
+        if ($user->isActive()) {
+            // Attempting to deactivate
+            if ($user->id === $request->user()->id) {
+                return response()->json([
+                    'message' => 'You cannot deactivate your own account.',
+                ], 422);
+            }
+
+            if ($user->role === 'admin') {
+                $activeAdminCount = User::where('role', 'admin')
+                    ->where('is_active', true)
+                    ->whereNull('deactivated_at')
+                    ->count();
+
+                if ($activeAdminCount <= 1) {
+                    return response()->json([
+                        'message' => 'Cannot deactivate the only active administrator account in the system.',
+                    ], 422);
+                }
+            }
+
+            $user->update([
+                'is_active' => false,
+                'deactivated_at' => now(),
+            ]);
+
+            // Immediately revoke all access tokens so deactivated user cannot make API calls
+            $user->tokens()->delete();
+
+            ActivityLog::create([
+                'user_id' => $request->user()->id,
+                'action' => 'user_deactivated',
+                'model_type' => User::class,
+                'model_id' => $user->id,
+                'description' => "User {$user->name} ({$user->email}) deactivated by {$request->user()->name}",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            $message = "User {$user->name} has been deactivated.";
+        } else {
+            // Reactivate
+            $user->update([
+                'is_active' => true,
+                'deactivated_at' => null,
+            ]);
+
+            ActivityLog::create([
+                'user_id' => $request->user()->id,
+                'action' => 'user_reactivated',
+                'model_type' => User::class,
+                'model_id' => $user->id,
+                'description' => "User {$user->name} ({$user->email}) reactivated by {$request->user()->name}",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            $message = "User {$user->name} has been reactivated.";
+        }
+
+        return response()->json([
+            'message' => $message,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'is_active' => (bool) $user->is_active,
+                'deactivated_at' => $user->deactivated_at,
             ],
         ]);
     }
@@ -228,12 +317,21 @@ class UserController extends Controller
             'can_add_more' => true,
         ]);
     }
+
     /**
      * Get a list of users for dropdown selection (name and id only)
      */
     public function publicList(Request $request)
     {
-        $users = User::select('id', 'name', 'role')->get();
+        if (!$request->user() || !in_array($request->user()->role, ['admin', 'super_admin', 'staff', 'consultation_staff', 'compliance_officer'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $users = User::where('is_active', true)
+            ->whereNull('deactivated_at')
+            ->select('id', 'name', 'role')
+            ->get();
+
         return response()->json($users);
     }
 }

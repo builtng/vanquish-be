@@ -7,6 +7,10 @@ use App\Models\User;
 use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
+use App\Services\EmailService;
 use Illuminate\Validation\ValidationException;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -33,6 +37,18 @@ class AuthController extends Controller
             
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        // Check if user account is deactivated
+        if (!$user->isActive()) {
+            \Log::warning('Login attempt for deactivated user', [
+                'email' => $email,
+                'ip' => $request->ip(),
+            ]);
+
+            throw ValidationException::withMessages([
+                'email' => ['This account has been deactivated. Please contact an administrator.'],
             ]);
         }
 
@@ -92,21 +108,13 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // Enforce 3-user limit
-        $userCount = User::count();
-        if ($userCount >= 3) {
-            return response()->json([
-                'message' => 'Maximum number of users (3) has been reached. Cannot create more users.',
-            ], 403);
-        }
-
         $request->validate([
             'name' => 'required|string|max:255|regex:/^[a-zA-Z\s\-\'\.]+$/',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => [
                 'required',
                 'string',
-                'min:8',
+                'min:12',
                 'confirmed',
                 'regex:/[a-z]/',      // Must contain at least one lowercase letter
                 'regex:/[A-Z]/',      // Must contain at least one uppercase letter
@@ -115,6 +123,7 @@ class AuthController extends Controller
             'role' => 'nullable|string|in:admin,staff',
         ], [
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
+            'password.min' => 'Password must be at least 12 characters.',
         ]);
 
         // Only allow admin role creation in development or if explicitly allowed
@@ -206,6 +215,7 @@ class AuthController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
+            'is_active' => (bool) $user->is_active,
             'two_factor_enabled' => $user->two_factor_enabled,
             'training_counsellor_id' => $user->training_counsellor_id,
             'photo' => null,
@@ -230,8 +240,19 @@ class AuthController extends Controller
         
         $validated = $request->validate([
             'current_password' => 'required|string',
-            'new_password' => 'required|string|min:8|confirmed',
+            'new_password' => [
+                'required',
+                'string',
+                'min:12',
+                'confirmed',
+                'regex:/[a-z]/',
+                'regex:/[A-Z]/',
+                'regex:/[0-9]/',
+            ],
             'new_password_confirmation' => 'required|string',
+        ], [
+            'new_password.min' => 'Password must be at least 12 characters.',
+            'new_password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
         ]);
 
         // Verify current password
@@ -411,6 +432,139 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Account deleted successfully.',
+        ]);
+    }
+
+    /**
+     * Request a password reset link
+     */
+    public function forgotPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email|max:255',
+        ]);
+
+        $email = strtolower(trim($request->email));
+        $user = User::where('email', $email)->first();
+
+        // If user exists and is active, issue token and send email
+        if ($user && $user->isActive()) {
+            $token = Str::random(64);
+
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+            DB::table('password_reset_tokens')->insert([
+                'email' => $email,
+                'token' => hash('sha256', $token),
+                'created_at' => now(),
+            ]);
+
+            $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
+            $resetUrl = $baseUrl . '/reset-password?token=' . $token . '&email=' . urlencode($email);
+
+            try {
+                app(EmailService::class)->sendAndLog(
+                    $email,
+                    'password_reset',
+                    [
+                        'name' => $user->name,
+                        'reset_link' => $resetUrl,
+                        'link' => $resetUrl,
+                        'expires_in' => '60 minutes',
+                    ]
+                );
+            } catch (\Exception $e) {
+                \Log::error("Failed to send password reset email to {$email}: " . $e->getMessage());
+            }
+
+            ActivityLog::create([
+                'user_id' => $user->id,
+                'action' => 'password_reset_requested',
+                'model_type' => User::class,
+                'model_id' => $user->id,
+                'description' => "Password reset requested for {$email}",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        }
+
+        // Always return generic success response to prevent email enumeration
+        return response()->json([
+            'message' => 'If an active account exists with that email address, a password reset link has been sent.',
+        ]);
+    }
+
+    /**
+     * Reset password using token
+     */
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'token' => 'required|string',
+            'email' => 'required|email',
+            'password' => [
+                'required',
+                'string',
+                'min:12',
+                'confirmed',
+                'regex:/[a-z]/',
+                'regex:/[A-Z]/',
+                'regex:/[0-9]/',
+            ],
+            'password_confirmation' => 'required|string',
+        ], [
+            'password.min' => 'Password must be at least 12 characters.',
+            'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
+        ]);
+
+        $email = strtolower(trim($request->email));
+        $token = $request->token;
+
+        $record = DB::table('password_reset_tokens')->where('email', $email)->first();
+
+        if (!$record || !hash_equals($record->token, hash('sha256', $token))) {
+            throw ValidationException::withMessages([
+                'token' => ['This password reset link is invalid or has expired.'],
+            ]);
+        }
+
+        // Check if token expired (60 minutes)
+        if (Carbon::parse($record->created_at)->addMinutes(60)->isPast()) {
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+            throw ValidationException::withMessages([
+                'token' => ['This password reset link has expired. Please request a new one.'],
+            ]);
+        }
+
+        $user = User::where('email', $email)->first();
+
+        if (!$user || !$user->isActive()) {
+            throw ValidationException::withMessages([
+                'email' => ['Unable to reset password for this account.'],
+            ]);
+        }
+
+        $user->update([
+            'password' => Hash::make($request->password),
+        ]);
+
+        // Invalidate all active tokens for security
+        $user->tokens()->delete();
+
+        // Delete reset token
+        DB::table('password_reset_tokens')->where('email', $email)->delete();
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'password_reset_completed',
+            'model_type' => User::class,
+            'model_id' => $user->id,
+            'description' => "Password reset completed for {$email}",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'message' => 'Your password has been reset successfully. You can now log in with your new password.',
         ]);
     }
 }
