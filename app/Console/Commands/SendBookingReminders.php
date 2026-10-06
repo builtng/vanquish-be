@@ -23,7 +23,7 @@ class SendBookingReminders extends Command
      *
      * @var string
      */
-    protected $description = 'Send booking reminders to Low Cost clients 48 hours before their booking deadline';
+    protected $description = 'Send booking reminders to Low Cost clients 3 days before their booking deadline';
 
     /**
      * Execute the console command.
@@ -32,11 +32,14 @@ class SendBookingReminders extends Command
     {
         $this->info('Checking for clients needing booking reminders...');
 
-        // Find Low Cost clients with booking deadlines in 48 hours
-        $deadlineDate = Carbon::now()->addHours(48)->format('Y-m-d');
+        // Find Low Cost clients with booking deadlines in 3 days (or within 3 days if not yet notified)
+        $deadlineTarget = Carbon::now()->addDays(3)->format('Y-m-d');
+        $today = Carbon::now()->format('Y-m-d');
 
         $clients = Client::where('service_type', 'Low Cost')
-            ->where('next_booking_deadline', $deadlineDate)
+            ->whereNotNull('next_booking_deadline')
+            ->whereDate('next_booking_deadline', '>=', $today)
+            ->whereDate('next_booking_deadline', '<=', $deadlineTarget)
             ->whereNotNull('matched_tc_id')
             ->where('agreement_status', 'signed')
             ->get();

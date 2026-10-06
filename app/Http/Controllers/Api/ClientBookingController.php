@@ -475,73 +475,67 @@ class ClientBookingController extends Controller
             if (!in_array($sessionsCount, [3, 4], true)) {
                 return response()->json(['message' => 'Low Cost sessions must be booked in a block of 4.'], 422);
             }
-        } else {
-            $sessionsCount = $validated['sessions_count'] ?? null;
 
-            if (!in_array($sessionsCount, [2, 3, 4], true)) {
-                return response()->json(['message' => 'Please choose a block of 2, 3, or 4 sessions.'], 422);
-            }
-        }
-
-        $sessionDates = [];
-        $isManualSelection = false;
-
-        if (!empty($validated['session_slots'])) {
-            // Manual selection mode (client explicitly chose these dates)
-            $isManualSelection = true;
-            $slots = $validated['session_slots'];
-
-            // Sort chronologically
-            usort($slots, function($a, $b) {
-                return strtotime($a) - strtotime($b);
-            });
-
-            $slots = array_slice($slots, 0, $sessionsCount);
-
-            if (count($slots) < $sessionsCount) {
-                return response()->json(['message' => "Please select exactly {$sessionsCount} slots."], 400);
+            if (!$client->allocated_day || !$client->allocated_time) {
+                return response()->json([
+                    'message' => 'Your regular weekly session time has not been assigned by our admin team yet. Please contact support.',
+                ], 422);
             }
 
-            foreach ($slots as $slot) {
-                $sessionDates[] = Carbon::parse($slot);
-            }
-        } elseif ($isLowCost && $client->allocated_day && $client->allocated_time && empty($validated['start_date'])) {
-            // Auto mode: client already has a regular weekly slot - generate the
-            // next N valid dates ourselves (holiday + double-booking aware)
-            // rather than trusting client-supplied dates.
+            // Auto mode: generate the next valid dates (holiday + double-booking aware)
             $sessionDates = $this->generateNextLowCostSlots($tc, $client, $sessionsCount);
 
             if (count($sessionDates) < $sessionsCount) {
                 return response()->json(['message' => 'Could not find enough available slots for your regular day/time. Please contact support.'], 400);
             }
         } else {
-            // Legacy recurring mode (Fallback - explicit start date/time selection)
-            $isManualSelection = true;
+            $sessionsCount = $validated['sessions_count'] ?? null;
 
-            if (empty($validated['start_date'])) {
-                return response()->json(['message' => 'Start date or session slots are required.'], 400);
-            }
-            $startDate = Carbon::parse($validated['start_date']);
-            $timeToUse = $validated['time_slot'] ?? $client->allocated_time;
-
-            if ($timeToUse) {
-                $formattedTime = $this->formatTimeToHHi($timeToUse);
-                $startDate = Carbon::parse($startDate->format('Y-m-d') . ' ' . $formattedTime);
+            if (!in_array($sessionsCount, [2, 3, 4], true)) {
+                return response()->json(['message' => 'Please choose a block of 2, 3, or 4 sessions.'], 422);
             }
 
-            for ($i = 0; $i < $sessionsCount; $i++) {
-                $sessionDates[] = $startDate->copy()->addWeeks($i);
-            }
-        }
+            $sessionDates = [];
+            $isManualSelection = false;
 
-        // Manual selection sets (or re-syncs) the client's regular weekly
-        // day/time - this covers both the first-ever booking and the case
-        // where a client had to re-pick because their TC dropped their old slot.
-        if ($isLowCost && $isManualSelection) {
-            $client->update([
-                'allocated_day' => $sessionDates[0]->format('l'),
-                'allocated_time' => $sessionDates[0]->format('g:ia'),
-            ]);
+            if (!empty($validated['session_slots'])) {
+                // Manual selection mode (client explicitly chose these dates)
+                $isManualSelection = true;
+                $slots = $validated['session_slots'];
+
+                // Sort chronologically
+                usort($slots, function($a, $b) {
+                    return strtotime($a) - strtotime($b);
+                });
+
+                $slots = array_slice($slots, 0, $sessionsCount);
+
+                if (count($slots) < $sessionsCount) {
+                    return response()->json(['message' => "Please select exactly {$sessionsCount} slots."], 400);
+                }
+
+                foreach ($slots as $slot) {
+                    $sessionDates[] = Carbon::parse($slot);
+                }
+            } else {
+                // Legacy recurring mode (Fallback - explicit start date/time selection)
+                $isManualSelection = true;
+
+                if (empty($validated['start_date'])) {
+                    return response()->json(['message' => 'Start date or session slots are required.'], 400);
+                }
+                $startDate = Carbon::parse($validated['start_date']);
+                $timeToUse = $validated['time_slot'] ?? $client->allocated_time;
+
+                if ($timeToUse) {
+                    $formattedTime = $this->formatTimeToHHi($timeToUse);
+                    $startDate = Carbon::parse($startDate->format('Y-m-d') . ' ' . $formattedTime);
+                }
+
+                for ($i = 0; $i < $sessionsCount; $i++) {
+                    $sessionDates[] = $startDate->copy()->addWeeks($i);
+                }
+            }
         }
 
         // --- 48-hour rule check for the FIRST session ---

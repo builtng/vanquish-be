@@ -14,6 +14,7 @@ class QcApplication extends Model
         'uuid',
         'person_id',
         'training_counsellor_id',
+        'suggested_training_counsellor_id',
         'legal_first_name',
         'legal_last_name',
         'name',
@@ -62,6 +63,11 @@ class QcApplication extends Model
     public function trainingCounsellor(): BelongsTo
     {
         return $this->belongsTo(TrainingCounsellor::class, 'training_counsellor_id');
+    }
+
+    public function suggestedTrainingCounsellor(): BelongsTo
+    {
+        return $this->belongsTo(TrainingCounsellor::class, 'suggested_training_counsellor_id');
     }
 
     public function scopeActive($query)

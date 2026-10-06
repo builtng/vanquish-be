@@ -778,15 +778,18 @@ class TraineeApplicationController extends Controller
             $portalUrl = rtrim(config('app.frontend_url', 'https://vqtmanagement.com'), '/') . '/counsellor-login';
 
             // ── 1. Find or create TrainingCounsellor record ──────────────────────
-            // Check withTrashed() so we don't duplicate a soft-deleted counsellor
-            $tc = TrainingCounsellor::withTrashed()->where('email', $traineeApplication->email)->first();
-
-            if ($tc && $tc->trashed()) {
-                $tc->restore();
-            }
+            // Only find active non-archived counsellor. Soft-deleted counsellors are NEVER restored.
+            $tc = TrainingCounsellor::whereNull('archived_at')->where('email', $traineeApplication->email)->first();
 
             if (!$tc) {
+                $person = Person::findOrCreateByEmail(
+                    $traineeApplication->email,
+                    trim($traineeApplication->first_name . ' ' . $traineeApplication->last_name),
+                    $traineeApplication->phone ?? null
+                );
+
                 $tc = TrainingCounsellor::create([
+                    'person_id'   => $person->id,
                     'tc_id'       => TrainingCounsellor::generateUniqueTcId(),
                     'name'        => trim($traineeApplication->first_name . ' ' . $traineeApplication->last_name),
                     'email'       => $traineeApplication->email,
@@ -824,8 +827,7 @@ class TraineeApplicationController extends Controller
                     'role'                    => 'counsellor',
                     'training_counsellor_id'  => $tc->id,
                 ]);
-            } elseif ($existingUser->role !== 'counsellor') {
-                // Existing user with a different role — update to counsellor and link TC
+            } elseif (!in_array($existingUser->role, ['admin', 'staff', 'super_admin'])) {
                 $existingUser->update([
                     'role'                   => 'counsellor',
                     'training_counsellor_id' => $tc->id,

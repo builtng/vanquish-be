@@ -234,6 +234,10 @@ class SameEmailSubmissionSeparationTest extends TestCase
         $this->assertEquals('Rooshan', $qcApp->legal_first_name);
         $this->assertEquals('Ahmed', $qcApp->legal_last_name);
 
+        // Admin accepts the application (TrainingCounsellor is created when admin accepts)
+        $acceptRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$qcApp->id}/accept");
+        $acceptRes->assertStatus(200);
+
         // - A fresh active TrainingCounsellor exists with name "Rooshan Ahmed"
         $activeTc = TrainingCounsellor::whereNull('archived_at')->where('email', 'rooshan@example.com')->first();
         $this->assertNotNull($activeTc);
@@ -302,4 +306,386 @@ class SameEmailSubmissionSeparationTest extends TestCase
         $this->assertEquals($persons[0]->id, $apps[0]->person_id);
         $this->assertEquals($persons[0]->id, $apps[1]->person_id);
     }
+
+    /**
+     * FIX Q01 Check First:
+     * An active counsellor "Old Person" exists with a@x.com.
+     * POST /api/qualified-counsellor/submit as "New Person" with "A@x.com ".
+     * Show that today the existing counsellor is renamed.
+     */
+    public function test_Q01_repeat_qc_keeps_existing_profile()
+    {
+        Mail::fake();
+
+        $oldTc = TrainingCounsellor::create([
+            'tc_id' => 'QC001',
+            'name' => 'Old Person',
+            'legal_first_name' => 'Old',
+            'legal_last_name' => 'Person',
+            'email' => 'a@x.com',
+            'phone' => '07000000000',
+            'registered_address' => '1 Old St',
+            'registered_city' => 'London',
+            'registered_postcode' => 'EC1 1AA',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'signature' => 'Old Person',
+            'signature_date' => '2026-01-01',
+        ]);
+
+        $qcPayload = [
+            'legal_first_name' => 'New',
+            'legal_last_name' => 'Person',
+            'email' => 'A@x.com ',
+            'phone' => '07999888777',
+            'registered_address' => '50 High Street',
+            'registered_city' => 'Birmingham',
+            'registered_postcode' => 'B1 1BB',
+            'has_supervisor' => 'yes',
+            'signature' => 'New Person',
+            'signature_date' => '2026-10-01',
+        ];
+
+        $res = $this->postJson('/api/qualified-counsellor/submit', $qcPayload);
+        $res->assertStatus(200);
+
+        // The existing counsellor profile must remain unchanged as "Old Person"
+        $this->assertEquals('Old Person', $oldTc->fresh()->name);
+    }
+
+    /**
+     * Requirement: Two QC applications with one email produce two distinct applications
+     * linked to the same person, with no automatic counsellor creation.
+     */
+    public function test_Q01_repeat_qc_creates_second_application()
+    {
+        Mail::fake();
+
+        $app1 = [
+            'legal_first_name' => 'Alice',
+            'legal_last_name' => 'Wonderland',
+            'email' => 'alice@example.com',
+            'phone' => '07111222333',
+            'registered_address' => '1 Rabbit Hole',
+            'registered_city' => 'Oxford',
+            'registered_postcode' => 'OX1 1AA',
+            'has_supervisor' => 'yes',
+            'signature' => 'Alice Wonderland',
+            'signature_date' => '2026-01-01',
+        ];
+
+        $res1 = $this->postJson('/api/qualified-counsellor/submit', $app1);
+        $res1->assertStatus(200);
+
+        $app2 = [
+            'legal_first_name' => 'Alice',
+            'legal_last_name' => 'Liddell',
+            'email' => 'alice@example.com',
+            'phone' => '07444555666',
+            'registered_address' => '2 Looking Glass Way',
+            'registered_city' => 'Oxford',
+            'registered_postcode' => 'OX2 2BB',
+            'has_supervisor' => 'no',
+            'signature' => 'Alice Liddell',
+            'signature_date' => '2026-06-01',
+        ];
+
+        $res2 = $this->postJson('/api/qualified-counsellor/submit', $app2);
+        $res2->assertStatus(200);
+
+        // Confirm TWO distinct QcApplication records exist
+        $apps = QcApplication::where('email', 'alice@example.com')->orderBy('id', 'asc')->get();
+        $this->assertCount(2, $apps);
+        $this->assertEquals('Alice Wonderland', $apps[0]->name);
+        $this->assertEquals('Alice Liddell', $apps[1]->name);
+
+        // Both link to the same Person
+        $this->assertNotNull($apps[0]->person_id);
+        $this->assertEquals($apps[0]->person_id, $apps[1]->person_id);
+
+        // No training_counsellors row created automatically
+        $tcCount = TrainingCounsellor::where('email', 'alice@example.com')->count();
+        $this->assertEquals(0, $tcCount);
+    }
+
+    /**
+     * Requirement: Submitting a QC form never restores an archived counsellor.
+     */
+    public function test_Q01_archived_counsellor_never_restored()
+    {
+        Mail::fake();
+
+        $archivedTc = TrainingCounsellor::create([
+            'tc_id' => 'QC099',
+            'name' => 'Archived Counsellor',
+            'legal_first_name' => 'Archived',
+            'legal_last_name' => 'Counsellor',
+            'email' => 'archived.qc@example.com',
+            'phone' => '07000000000',
+            'registered_address' => '1 Vault Road',
+            'registered_city' => 'London',
+            'registered_postcode' => 'EC1 1AA',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Archived',
+            'signature' => 'Archived Counsellor',
+            'signature_date' => '2025-01-01',
+            'archived_at' => now(),
+        ]);
+        $archivedTc->delete();
+
+        $this->assertTrue($archivedTc->fresh()->trashed());
+
+        // Submit QC form with same email
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'New',
+            'legal_last_name' => 'Applicant',
+            'email' => 'archived.qc@example.com',
+            'phone' => '07999888777',
+            'registered_address' => '10 New St',
+            'registered_city' => 'Leeds',
+            'registered_postcode' => 'LS1 1AA',
+            'signature' => 'New Applicant',
+            'signature_date' => '2026-10-01',
+        ]);
+        $res->assertStatus(200);
+
+        // Archived counsellor remains soft-deleted and untouched
+        $archivedFresh = TrainingCounsellor::withTrashed()->find($archivedTc->id);
+        $this->assertTrue($archivedFresh->trashed());
+        $this->assertEquals('Archived Counsellor', $archivedFresh->name);
+
+        // No active counsellor exists
+        $activeTc = TrainingCounsellor::whereNull('archived_at')->where('email', 'archived.qc@example.com')->first();
+        $this->assertNull($activeTc);
+    }
+
+    /**
+     * Requirement: IntakeFormController tc-intake never restores an archived counsellor.
+     * Creates a new clean record linked to the person_id instead.
+     */
+    public function test_Q01_tc_intake_never_restores()
+    {
+        Mail::fake();
+
+        $person = Person::findOrCreateByEmail('archived.intake@example.com', 'Archived Trainee', '07000000000');
+
+        $archivedTc = TrainingCounsellor::create([
+            'person_id' => $person->id,
+            'tc_id' => 'TC050',
+            'name' => 'Archived Trainee',
+            'email' => 'archived.intake@example.com',
+            'phone' => '07000000000',
+            'status' => 'Archived',
+            'archived_at' => now(),
+        ]);
+        $archivedTc->delete();
+
+        $this->assertTrue($archivedTc->fresh()->trashed());
+
+        // Submit tc-intake with create_tc = true
+        $res = $this->postJson('/api/tc-intake', [
+            'create_tc' => true,
+            'name' => 'Returning Trainee',
+            'first_name' => 'Returning',
+            'last_name' => 'Trainee',
+            'email' => 'archived.intake@example.com',
+            'phone' => '07888999000',
+            'gender' => 'Female',
+            'modality' => 'CBT',
+            'course' => 'MSc Counselling',
+            'institution' => 'University of Manchester',
+        ]);
+        $res->assertStatus(201);
+
+        // Archived record was NEVER restored
+        $archivedFresh = TrainingCounsellor::withTrashed()->find($archivedTc->id);
+        $this->assertTrue($archivedFresh->trashed());
+        $this->assertEquals('Archived Trainee', $archivedFresh->name);
+
+        // New active record was created linked to same Person
+        $activeTc = TrainingCounsellor::whereNull('archived_at')->where('email', 'archived.intake@example.com')->first();
+        $this->assertNotNull($activeTc);
+        $this->assertNotEquals($archivedTc->id, $activeTc->id);
+        $this->assertEquals('Returning Trainee', $activeTc->name);
+        $this->assertEquals($person->id, $activeTc->person_id);
+    }
+
+    /**
+     * Requirement: TraineeApplicationController sendPortalInvite never restores an archived counsellor.
+     * Creates a new clean record linked to the person_id instead.
+     */
+    public function test_Q01_portal_invite_never_restores()
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $person = Person::findOrCreateByEmail('archived.portal@example.com', 'Archived Counsellor', '07000000000');
+
+        $archivedTc = TrainingCounsellor::create([
+            'person_id' => $person->id,
+            'tc_id' => 'TC060',
+            'name' => 'Archived Counsellor',
+            'email' => 'archived.portal@example.com',
+            'phone' => '07000000000',
+            'status' => 'Archived',
+            'archived_at' => now(),
+        ]);
+        $archivedTc->delete();
+
+        $this->assertTrue($archivedTc->fresh()->trashed());
+
+        // Create new trainee application for this email
+        $app = TraineeApplication::create([
+            'person_id' => $person->id,
+            'first_name' => 'Returning',
+            'last_name' => 'Applicant',
+            'name' => 'Returning Applicant',
+            'email' => 'archived.portal@example.com',
+            'phone' => '07777888999',
+            'status' => 'Induction Attended',
+        ]);
+
+        // Admin triggers portal invite
+        $res = $this->actingAs($admin)->postJson("/api/trainee-applications/{$app->id}/portal-invite");
+        $res->assertStatus(200);
+
+        // Archived counsellor remains soft-deleted
+        $archivedFresh = TrainingCounsellor::withTrashed()->find($archivedTc->id);
+        $this->assertTrue($archivedFresh->trashed());
+        $this->assertEquals('Archived Counsellor', $archivedFresh->name);
+
+        // A new clean counsellor profile was created
+        $activeTc = TrainingCounsellor::whereNull('archived_at')->where('email', 'archived.portal@example.com')->first();
+        $this->assertNotNull($activeTc);
+        $this->assertNotEquals($archivedTc->id, $activeTc->id);
+        $this->assertEquals('Returning Applicant', $activeTc->name);
+        $this->assertEquals($person->id, $activeTc->person_id);
+
+        // User account points to the active counsellor
+        $user = User::where('email', 'archived.portal@example.com')->first();
+        $this->assertNotNull($user);
+        $this->assertEquals($activeTc->id, $user->training_counsellor_id);
+    }
+
+    /**
+     * Requirement: Accept QC application preserves admin/staff user account.
+     */
+    public function test_Q01_admin_accept_preserves_admin_user_role()
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create([
+            'name' => 'Admin Boss',
+            'email' => 'admin.boss@example.com',
+            'role' => 'admin',
+        ]);
+
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'Admin',
+            'legal_last_name' => 'Boss',
+            'email' => 'admin.boss@example.com',
+            'phone' => '07111222333',
+            'registered_address' => '10 Downing St',
+            'registered_city' => 'London',
+            'registered_postcode' => 'SW1A 2AA',
+            'signature' => 'Admin Boss',
+            'signature_date' => '2026-10-01',
+        ]);
+        $res->assertStatus(200);
+
+        $appId = $res->json('application_id');
+        $acceptRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/accept");
+        $acceptRes->assertStatus(200);
+
+        // User role remains admin!
+        $adminFresh = User::where('email', 'admin.boss@example.com')->first();
+        $this->assertEquals('admin', $adminFresh->role);
+    }
+
+    /**
+     * Requirement: Linking to existing practitioner does not alter counsellor_type or tc_id,
+     * copies only selected fields, and rejects correctly archives application.
+     */
+    public function test_Q01_admin_link_selective_copy_and_reject()
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $existingTc = TrainingCounsellor::create([
+            'tc_id' => 'TC010',
+            'name' => 'Existing Trainee',
+            'legal_first_name' => 'Existing',
+            'legal_last_name' => 'Trainee',
+            'email' => 'trainee.link@example.com',
+            'phone' => '07000000000',
+            'registered_address' => 'Old Address',
+            'registered_city' => 'Old City',
+            'registered_postcode' => 'OLD 1AA',
+            'counsellor_type' => 'Trainee',
+            'status' => 'Active',
+            'signature' => 'Existing Trainee',
+            'signature_date' => '2025-01-01',
+        ]);
+
+        // Submit QC application with new phone and address
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'Existing',
+            'legal_last_name' => 'Trainee',
+            'email' => 'trainee.link@example.com',
+            'phone' => '07999888777',
+            'registered_address' => 'New Address',
+            'registered_city' => 'New City',
+            'registered_postcode' => 'NEW 2BB',
+            'signature' => 'Existing Trainee',
+            'signature_date' => '2026-10-01',
+        ]);
+        $res->assertStatus(200);
+        $appId = $res->json('application_id');
+
+        // Admin links application, copying ONLY phone (not registered address)
+        $linkRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/link", [
+            'training_counsellor_id' => $existingTc->id,
+            'copy_fields' => ['phone'],
+        ]);
+        $linkRes->assertStatus(200);
+
+        $existingFresh = $existingTc->fresh();
+        // counsellor_type and tc_id must NOT be altered on link
+        $this->assertEquals('Trainee', $existingFresh->counsellor_type);
+        $this->assertEquals('TC010', $existingFresh->tc_id);
+        // Only phone was copied
+        $this->assertEquals('07999888777', $existingFresh->phone);
+        // Address was NOT changed
+        $this->assertEquals('Old Address', $existingFresh->registered_address);
+
+        $appFresh = QcApplication::find($appId);
+        $this->assertEquals('Linked', $appFresh->status);
+        $this->assertEquals($existingTc->id, $appFresh->training_counsellor_id);
+
+        // Test reject endpoint on another application
+        $res2 = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'Reject',
+            'legal_last_name' => 'Me',
+            'email' => 'reject.me@example.com',
+            'phone' => '07111111111',
+            'registered_address' => 'No where',
+            'registered_city' => 'London',
+            'registered_postcode' => 'N1 1AA',
+            'signature' => 'Reject Me',
+            'signature_date' => '2026-10-01',
+        ]);
+        $app2Id = $res2->json('application_id');
+
+        $rejectRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$app2Id}/reject", [
+            'notes' => 'Did not meet requirements',
+        ]);
+        $rejectRes->assertStatus(200);
+
+        $rejectedApp = QcApplication::find($app2Id);
+        $this->assertEquals('Rejected', $rejectedApp->status);
+        $this->assertNotNull($rejectedApp->archived_at);
+        $this->assertEquals('Did not meet requirements', $rejectedApp->notes);
+    }
 }
+

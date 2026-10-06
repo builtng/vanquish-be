@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\PsgSessionController;
 use App\Http\Controllers\Api\SharedDocumentController;
 use App\Http\Controllers\Api\SessionNoteController;
 use App\Http\Controllers\Api\MatchingAlgorithmSettingController;
+use App\Http\Controllers\Api\QcApplicationController;
 use Illuminate\Support\Facades\Route;
 
 // Public routes with stricter rate limiting
@@ -206,6 +207,11 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     // Qualified Counsellor Form staff triggers
     Route::middleware('staff')->group(function () {
         Route::post('/training-counsellors/{tc}/send-qualified-form-email', [TrainingCounsellorController::class, 'sendQualifiedFormEmail']);
+        Route::get('/qc-applications', [QcApplicationController::class, 'index']);
+        Route::get('/qc-applications/{id}', [QcApplicationController::class, 'show']);
+        Route::post('/qc-applications/{id}/accept', [QcApplicationController::class, 'accept']);
+        Route::post('/qc-applications/{id}/link', [QcApplicationController::class, 'link']);
+        Route::post('/qc-applications/{id}/reject', [QcApplicationController::class, 'reject']);
     });
 
     // Consultations (staff and admin only)
@@ -243,11 +249,16 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         // Coupons
         Route::apiResource('coupons', \App\Http\Controllers\Api\CouponController::class);
 
-        // Admin Consultation Slots
+        // Admin Consultation Slots & Days Off
+        Route::post('/consultation-slots/preview', [\App\Http\Controllers\Api\Admin\ConsultationSlotController::class, 'previewRecurring']);
         Route::post('/consultation-slots/recurring', [\App\Http\Controllers\Api\Admin\ConsultationSlotController::class, 'storeRecurring']);
         Route::post('/consultation-slots/bulk', [\App\Http\Controllers\Api\Admin\ConsultationSlotController::class, 'storeBulk']);
         Route::post('/consultation-slots/range', [\App\Http\Controllers\Api\Admin\ConsultationSlotController::class, 'storeRange']);
         Route::apiResource('consultation-slots', \App\Http\Controllers\Api\Admin\ConsultationSlotController::class);
+
+        Route::get('/consultation-days-off', [\App\Http\Controllers\Api\Admin\ConsultationDayOffController::class, 'index']);
+        Route::post('/consultation-days-off', [\App\Http\Controllers\Api\Admin\ConsultationDayOffController::class, 'store']);
+        Route::delete('/consultation-days-off/{id}', [\App\Http\Controllers\Api\Admin\ConsultationDayOffController::class, 'destroy']);
     });
 
     // User Management (admin only)

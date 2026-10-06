@@ -367,6 +367,8 @@ class ClientController extends Controller
             'payment_status' => 'nullable|string|max:50',
             'stage' => 'nullable|string|max:100',
             'status' => 'nullable|string|max:50',
+            'allocated_day' => 'nullable|string|max:50',
+            'allocated_time' => 'nullable|string|max:50',
         ]);
 
         $client->update($validated);

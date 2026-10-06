@@ -645,14 +645,12 @@ class IntakeFormController extends Controller
 
             // Optionally create TC from intake form
             if ($request->has('create_tc') && $request->create_tc) {
-                // Check if TC with email already exists
-                $tc = TrainingCounsellor::withTrashed()->where('email', $validated['email'])->first();
+                $person = Person::findOrCreateByEmail($validated['email'], $validated['name'], $validated['phone'] ?? null);
+
+                // Check if active (non-archived) TC with email already exists. Archived TCs are NEVER restored.
+                $tc = TrainingCounsellor::whereNull('archived_at')->where('email', $validated['email'])->first();
 
                 if ($tc) {
-                    if ($tc->trashed()) {
-                        $tc->restore();
-                    }
-
                     $tc->update([
                         'name' => $validated['name'],
                         'phone' => $validated['phone'] ?? $tc->phone,
@@ -711,6 +709,7 @@ class IntakeFormController extends Controller
                     }
 
                     $tc = TrainingCounsellor::create([
+                        'person_id' => $person->id,
                         'tc_id' => $newTcId,
                         'name' => $validated['name'],
                         'email' => $validated['email'],

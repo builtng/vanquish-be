@@ -178,11 +178,21 @@ class Client extends Model
             return null;
         }
 
-        // Find the next scheduled session that's 48+ hours away
+        // Find the block session that has the booking deadline set
+        $sessionWithDeadline = $this->sessions()
+            ->where('status', 'scheduled')
+            ->whereNotNull('booking_deadline')
+            ->orderBy('scheduled_at', 'desc')
+            ->first();
+
+        if ($sessionWithDeadline) {
+            return $sessionWithDeadline;
+        }
+
+        // Fall back to next scheduled session that's 48+ hours away
         return $this->sessions()
             ->where('status', 'scheduled')
             ->where('scheduled_at', '>=', now()->addHours(48))
-            ->whereNull('booking_deadline') // Not yet booked
             ->orderBy('scheduled_at')
             ->first();
     }
