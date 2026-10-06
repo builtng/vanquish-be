@@ -23,6 +23,8 @@ class QcApplication extends Model
         'name',
         'email',
         'phone',
+        'previous_vanquish_work',
+        'areas_to_improve',
         'status',
         'answers',
         'qualification_document',
@@ -42,6 +44,16 @@ class QcApplication extends Model
         'signature_date' => 'date',
         'archived_at' => 'datetime',
     ];
+
+    public function getAreasToImproveAttribute($value): ?string
+    {
+        return $value ?? ($this->answers['areas_to_improve'] ?? null);
+    }
+
+    public function getPreviousVanquishWorkAttribute($value): ?string
+    {
+        return $value ?? ($this->answers['previous_vanquish_work'] ?? null);
+    }
 
     protected static function booted()
     {
