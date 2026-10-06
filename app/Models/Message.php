@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Message extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'from_user_id',
         'to_tc_id',
@@ -20,6 +23,8 @@ class Message extends Model
         'related_consultation_id',
         'is_trashed',
         'trashed_at',
+        'deleted_by_sender_at',
+        'deleted_by_recipient_at',
         'cc_users',
         'attachment_path',
         'attachment_name',
@@ -32,6 +37,8 @@ class Message extends Model
         'read_at' => 'datetime',
         'is_trashed' => 'boolean',
         'trashed_at' => 'datetime',
+        'deleted_by_sender_at' => 'datetime',
+        'deleted_by_recipient_at' => 'datetime',
         'cc_users' => 'array',
     ];
 

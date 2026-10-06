@@ -34,7 +34,12 @@ class TraineeApplicationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = TraineeApplication::orderBy('created_at', 'desc');
+        $user = $request->user();
+        $isStaffOrAdmin = $user && in_array($user->role, ['admin', 'super_admin', 'staff', 'manager']);
+        $includeArchived = $isStaffOrAdmin && $request->boolean('include_archived');
+
+        $query = ($includeArchived ? TraineeApplication::withTrashed() : TraineeApplication::whereNull('archived_at'))
+            ->orderBy('created_at', 'desc');
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -320,6 +325,40 @@ class TraineeApplicationController extends Controller
         ]);
 
         return response()->json(['message' => 'Application archived successfully']);
+    }
+
+    public function restore(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
+        }
+
+        $app = is_numeric($id)
+            ? TraineeApplication::withTrashed()->find($id)
+            : null;
+
+        if (!$app) {
+            $app = TraineeApplication::withTrashed()
+                ->where('application_reference', $id)
+                ->orWhere('id', $id)
+                ->firstOrFail();
+        }
+
+        $app->archived_at = null;
+        $app->restore();
+        $app->save();
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'trainee_application_restored',
+            'model_type' => TraineeApplication::class,
+            'model_id' => $app->id,
+            'description' => "Trainee application restored for {$app->first_name} {$app->last_name} by admin {$user->name}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json(['message' => 'Application restored successfully', 'application' => $app]);
     }
 
     /**

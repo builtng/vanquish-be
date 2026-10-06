@@ -100,6 +100,15 @@ class MessageController extends Controller
                     });
                 }
             })->where('is_trashed', false);
+
+            // Filter out messages soft-deleted by current user
+            $query->where(function($dq) use ($user) {
+                $dq->where(function($sub) use ($user) {
+                    $sub->where('from_user_id', $user->id)->whereNull('deleted_by_sender_at');
+                })->orWhere(function($sub) use ($user) {
+                    $sub->where('from_user_id', '!=', $user->id)->whereNull('deleted_by_recipient_at');
+                });
+            });
         } elseif ($user->isCounsellor() && $user->training_counsellor_id) {
             // ... (rest of folder logic remains same)
             if ($folder === 'trash') {
@@ -108,9 +117,9 @@ class MessageController extends Controller
                       ->orWhere('from_user_id', $user->id);
                 })->where('is_trashed', true);
             } elseif ($folder === 'sent') {
-                $query->where('from_user_id', $user->id)->where('is_trashed', false);
+                $query->where('from_user_id', $user->id)->where('is_trashed', false)->whereNull('deleted_by_sender_at');
             } else {
-                $query->where('to_tc_id', $user->training_counsellor_id)->where('is_trashed', false);
+                $query->where('to_tc_id', $user->training_counsellor_id)->where('is_trashed', false)->whereNull('deleted_by_recipient_at');
             }
         } else {
             // Staff/admin
@@ -120,9 +129,9 @@ class MessageController extends Controller
                       ->orWhere('from_user_id', $user->id);
                 })->where('is_trashed', true);
             } elseif ($folder === 'sent') {
-                $query->where('from_user_id', $user->id)->where('is_trashed', false);
+                $query->where('from_user_id', $user->id)->where('is_trashed', false)->whereNull('deleted_by_sender_at');
             } else {
-                $query->where('to_user_id', $user->id)->where('is_trashed', false);
+                $query->where('to_user_id', $user->id)->where('is_trashed', false)->whereNull('deleted_by_recipient_at');
             }
         }
 
@@ -151,10 +160,12 @@ class MessageController extends Controller
                 ->where(function($q) use ($user, $tcId) {
                     $q->where(function($inner) use ($user) {
                         $inner->where('from_user_id', $user->id)
-                              ->where('type', 'counsellor_to_staff');
+                              ->where('type', 'counsellor_to_staff')
+                              ->whereNull('deleted_by_sender_at');
                     })->orWhere(function($inner) use ($tcId) {
                         $inner->where('to_tc_id', $tcId)
-                              ->where('type', 'staff_to_counsellor');
+                              ->where('type', 'staff_to_counsellor')
+                              ->whereNull('deleted_by_recipient_at');
                     });
                 })
                 ->where('is_trashed', false)
@@ -219,6 +230,13 @@ class MessageController extends Controller
                     $q->where('to_user_id', $user->id)
                       ->orWhere('from_user_id', $user->id);
                 }
+            })
+            ->where(function($dq) use ($user) {
+                $dq->where(function($sub) use ($user) {
+                    $sub->where('from_user_id', $user->id)->whereNull('deleted_by_sender_at');
+                })->orWhere(function($sub) use ($user) {
+                    $sub->where('from_user_id', '!=', $user->id)->whereNull('deleted_by_recipient_at');
+                });
             })
             ->where('is_trashed', false)
             ->orderBy('created_at', 'desc')
@@ -861,16 +879,35 @@ class MessageController extends Controller
     }
 
     /**
-     * Permanently delete a message
+     * Soft delete a message for the current user only
      */
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
         $message = Message::findOrFail($id);
 
-        $message->delete();
+        $isSender = (int)$message->from_user_id === (int)$user->id;
+        $isRecipient = (int)$message->to_user_id === (int)$user->id
+            || ($user->training_counsellor_id && (int)$message->to_tc_id === (int)$user->training_counsellor_id);
 
-        return response()->json(['message' => 'Message permanently deleted']);
+        if (!$isSender && !$isRecipient && !in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if ($isSender) {
+            $message->deleted_by_sender_at = now();
+        }
+        if ($isRecipient) {
+            $message->deleted_by_recipient_at = now();
+        }
+        if (!$isSender && !$isRecipient && in_array($user->role, ['admin', 'super_admin'])) {
+            $message->deleted_by_sender_at = now();
+            $message->deleted_by_recipient_at = now();
+        }
+
+        $message->save();
+
+        return response()->json(['message' => 'Message deleted successfully']);
     }
 
     /**
@@ -999,7 +1036,7 @@ class MessageController extends Controller
     }
 
     /**
-     * Delete an entire conversation
+     * Soft delete an entire conversation for the current user only
      */
     public function deleteConversation(Request $request, $peerType, $peerId)
     {
@@ -1007,16 +1044,23 @@ class MessageController extends Controller
 
         // ── Admin Group: counsellor deletes their admin thread ──
         if ($peerId === 'admin_group' && $peerType === 'group' && $user->isCounsellor() && $user->training_counsellor_id) {
-            $count = Message::where(function($q) use ($user) {
+            $messages = Message::where(function($q) use ($user) {
                 $q->where('from_user_id', $user->id)->where('type', 'counsellor_to_staff');
             })->orWhere(function($q) use ($user) {
                 $q->where('to_tc_id', $user->training_counsellor_id)->where('type', 'staff_to_counsellor');
-            })->count();
-            Message::where(function($q) use ($user) {
-                $q->where('from_user_id', $user->id)->where('type', 'counsellor_to_staff');
-            })->orWhere(function($q) use ($user) {
-                $q->where('to_tc_id', $user->training_counsellor_id)->where('type', 'staff_to_counsellor');
-            })->delete();
+            })->get();
+
+            $count = $messages->count();
+            foreach ($messages as $msg) {
+                if ((int)$msg->from_user_id === (int)$user->id) {
+                    $msg->deleted_by_sender_at = now();
+                }
+                if ((int)$msg->to_tc_id === (int)$user->training_counsellor_id) {
+                    $msg->deleted_by_recipient_at = now();
+                }
+                $msg->save();
+            }
+
             return response()->json(['message' => 'Admin thread deleted.', 'count' => $count]);
         }
         
@@ -1047,8 +1091,17 @@ class MessageController extends Controller
             });
         });
 
-        $count = $query->count();
-        $query->delete();
+        $messages = $query->get();
+        $count = $messages->count();
+        foreach ($messages as $msg) {
+            if ((int)$msg->from_user_id === (int)$user->id) {
+                $msg->deleted_by_sender_at = now();
+            }
+            if ((int)$msg->to_user_id === (int)$user->id || ($user->training_counsellor_id && (int)$msg->to_tc_id === (int)$user->training_counsellor_id)) {
+                $msg->deleted_by_recipient_at = now();
+            }
+            $msg->save();
+        }
 
         return response()->json([
             'message' => 'Conversation deleted successfully.',

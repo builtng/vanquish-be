@@ -18,7 +18,12 @@ class QcApplicationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = QcApplication::with(['suggestedTrainingCounsellor', 'trainingCounsellor', 'person']);
+        $user = $request->user();
+        $isStaffOrAdmin = $user && in_array($user->role, ['admin', 'super_admin', 'staff', 'manager']);
+        $includeArchived = $isStaffOrAdmin && $request->boolean('include_archived');
+
+        $query = ($includeArchived ? QcApplication::withTrashed() : QcApplication::whereNull('archived_at'))
+            ->with(['suggestedTrainingCounsellor', 'trainingCounsellor', 'person']);
 
         // Filter by status
         if ($request->filled('status') && $request->status !== 'all') {
@@ -392,17 +397,23 @@ class QcApplicationController extends Controller
      */
     public function restore(Request $request, $id)
     {
+        $user = $request->user();
+        if ($user && !in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
+        }
+
         $qcApp = is_numeric($id)
-            ? QcApplication::findOrFail($id)
-            : QcApplication::where('uuid', $id)->firstOrFail();
+            ? QcApplication::withTrashed()->findOrFail($id)
+            : QcApplication::withTrashed()->where('uuid', $id)->firstOrFail();
 
         $qcApp->update([
             'status' => 'Submitted',
             'archived_at' => null,
         ]);
+        $qcApp->restore();
 
         ActivityLog::create([
-            'user_id' => $request->user()->id ?? null,
+            'user_id' => $user->id ?? null,
             'action' => 'qc_application_restored',
             'model_type' => QcApplication::class,
             'model_id' => $qcApp->id,
@@ -414,5 +425,31 @@ class QcApplicationController extends Controller
             'message' => 'Application restored successfully.',
             'application' => $qcApp->fresh(),
         ]);
+    }
+
+    /**
+     * Archive a QC application (never hard delete)
+     */
+    public function destroy(Request $request, $id)
+    {
+        $qcApp = is_numeric($id)
+            ? QcApplication::findOrFail($id)
+            : QcApplication::where('uuid', $id)->firstOrFail();
+
+        $qcApp->archived_at = now();
+        $qcApp->status = 'Archived';
+        $qcApp->save();
+        $qcApp->delete();
+
+        ActivityLog::create([
+            'user_id' => $request->user()->id ?? null,
+            'action' => 'qc_application_archived',
+            'model_type' => QcApplication::class,
+            'model_id' => $qcApp->id,
+            'description' => "Qualified counsellor application #{$qcApp->id} archived for {$qcApp->name}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json(['message' => 'Application archived successfully']);
     }
 }

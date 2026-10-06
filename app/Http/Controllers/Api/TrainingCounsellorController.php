@@ -24,7 +24,13 @@ class TrainingCounsellorController extends Controller
 {
     public function index(Request $request)
     {
-        $query = TrainingCounsellor::with(['clients', 'intakeForm'])->orderBy('id', 'desc');
+        $user = $request->user();
+        $isStaffOrAdmin = $user && in_array($user->role, ['admin', 'super_admin', 'staff', 'manager']);
+        $includeArchived = $isStaffOrAdmin && $request->boolean('include_archived');
+
+        $query = ($includeArchived ? TrainingCounsellor::withTrashed() : TrainingCounsellor::whereNull('archived_at'))
+            ->with(['clients', 'intakeForm'])
+            ->orderBy('id', 'desc');
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -442,6 +448,43 @@ class TrainingCounsellorController extends Controller
         ]);
 
         return response()->json(['message' => "{$typeLabel} archived successfully"]);
+    }
+
+    public function restore(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
+        }
+
+        $tc = is_numeric($id)
+            ? TrainingCounsellor::withTrashed()->find($id)
+            : null;
+
+        if (!$tc) {
+            $tc = TrainingCounsellor::withTrashed()
+                ->where('uuid', $id)
+                ->orWhere('tc_id', $id)
+                ->orWhere('id', $id)
+                ->firstOrFail();
+        }
+
+        $typeLabel = $tc->counsellor_type === 'Qualified' ? 'Qualified Counsellor' : 'Trainee Counsellor';
+
+        $tc->archived_at = null;
+        $tc->restore();
+        $tc->save();
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'counsellor_restored',
+            'model_type' => TrainingCounsellor::class,
+            'model_id' => $tc->id,
+            'description' => "{$typeLabel} {$tc->name} ({$tc->tc_id}) restored by admin {$user->name}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json(['message' => "{$typeLabel} restored successfully", 'practitioner' => $tc]);
     }
 
     /**

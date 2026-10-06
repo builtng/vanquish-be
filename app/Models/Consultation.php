@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Consultation extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'consultation_id',
         'client_id',
@@ -14,6 +17,9 @@ class Consultation extends Model
         'scheduled_at',
         'completed_at',
         'status',
+        'cancelled_at',
+        'cancelled_by',
+        'archived_at',
         'duration_minutes',
         'notes',
         'outcome',
@@ -35,11 +41,18 @@ class Consultation extends Model
     protected $casts = [
         'scheduled_at' => 'datetime',
         'completed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
+        'archived_at' => 'datetime',
         'send_confirmation' => 'boolean',
         'paid_at' => 'datetime',
         'payment_amount' => 'decimal:2',
         'is_fallback' => 'boolean',
     ];
+
+    public function cancelledByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
 
     public function client(): BelongsTo
     {

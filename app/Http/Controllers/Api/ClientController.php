@@ -36,7 +36,13 @@ class ClientController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $query = Client::with(['matchedTc'])->orderBy('id', 'desc');
+        $user = $request->user();
+        $isStaffOrAdmin = $user && in_array($user->role, ['admin', 'super_admin', 'staff', 'manager']);
+        $includeArchived = $isStaffOrAdmin && $request->boolean('include_archived');
+
+        $query = ($includeArchived ? Client::withTrashed() : Client::whereNull('archived_at'))
+            ->with(['matchedTc'])
+            ->orderBy('id', 'desc');
 
         // Search - sanitize input
         if ($request->has('search')) {
@@ -430,11 +436,47 @@ class ClientController extends Controller
         return response()->json(['message' => 'Client archived successfully']);
     }
 
+    public function restore(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json(['message' => 'Unauthorized. Only admins can restore clients.'], 403);
+        }
+
+        $clientQuery = Client::withTrashed()->where('uuid', $id)->orWhere('client_id', $id);
+        if (is_numeric($id)) {
+            $clientQuery->orWhere('id', $id);
+        }
+        $client = $clientQuery->firstOrFail();
+
+        $client->archived_at = null;
+        $client->status = 'active';
+        $client->restore();
+        $client->save();
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'client_restored',
+            'model_type' => Client::class,
+            'model_id' => $client->id,
+            'description' => "Client {$client->name} ({$client->client_id}) restored by admin {$user->name}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'message' => 'Client restored successfully',
+            'client' => $client->fresh()->load('matchedTc'),
+        ]);
+    }
+
     public function details(Request $request, $id)
     {
         // Find by UUID or fall back to client_id for backward compatibility
-        $client = Client::where('uuid', $id)
-            ->orWhere('client_id', $id)
+        $clientQuery = Client::withTrashed()->where('uuid', $id)->orWhere('client_id', $id);
+        if (is_numeric($id)) {
+            $clientQuery->orWhere('id', $id);
+        }
+        $client = $clientQuery
             ->with([
                 'matchedTc',
                 'consultations.tc',

@@ -21,7 +21,14 @@ class ActivityLogController extends Controller
             ], 403);
         }
 
-        $query = ActivityLog::with(['user'])->orderBy('id', 'desc');
+        $query = ActivityLog::with(['user', 'hiddenByUser'])->orderBy('id', 'desc');
+
+        // Hide notes from default view unless explicitly requested
+        if (!$request->boolean('include_hidden') && !$request->boolean('show_hidden')) {
+            $query->whereNull('hidden_at');
+        } elseif ($request->boolean('only_hidden')) {
+            $query->whereNotNull('hidden_at');
+        }
 
         if ($request->has('action')) {
             $query->where('action', $request->action);
@@ -69,17 +76,27 @@ class ActivityLogController extends Controller
                 $data['user'] = null;
             }
 
+            if ($log->hiddenByUser) {
+                $data['hidden_by_user'] = [
+                    'id' => $log->hiddenByUser->id,
+                    'name' => $log->hiddenByUser->name,
+                    'role' => $log->hiddenByUser->role,
+                ];
+            } else {
+                $data['hidden_by_user'] = null;
+            }
+
             // Add related model UUID if available
             if ($log->model_type && $log->model_id) {
                 if ($log->model_type === Client::class) {
-                    $client = Client::find($log->model_id);
+                    $client = Client::withTrashed()->find($log->model_id);
                     if ($client) {
                         $data['client_uuid'] = $client->uuid;
                         $data['client_id'] = $client->client_id;
                         $data['client_name'] = $client->name;
                     }
                 } elseif ($log->model_type === TrainingCounsellor::class) {
-                    $tc = TrainingCounsellor::find($log->model_id);
+                    $tc = TrainingCounsellor::withTrashed()->find($log->model_id);
                     if ($tc) {
                         $data['tc_uuid'] = $tc->uuid;
                         $data['tc_id'] = $tc->tc_id;
@@ -138,7 +155,7 @@ class ActivityLogController extends Controller
         $user = $request->user();
 
         // Only allow updating if user is admin/staff, or if they created the note
-        if (!in_array($user->role, ['admin', 'staff']) && $log->user_id !== $user->id) {
+        if (!in_array($user->role, ['admin', 'staff', 'super_admin']) && $log->user_id !== $user->id) {
             return response()->json([
                 'message' => 'Unauthorized. You can only edit your own notes.',
             ], 403);
@@ -156,20 +173,75 @@ class ActivityLogController extends Controller
         return response()->json($log);
     }
 
-    public function destroy(Request $request, $id)
+    public function hide(Request $request, $id)
     {
         $log = ActivityLog::findOrFail($id);
         $user = $request->user();
 
-        // Only allow deleting if user is admin/staff, or if they created the note
-        if (!in_array($user->role, ['admin', 'staff']) && $log->user_id !== $user->id) {
+        if (!in_array($user->role, ['admin', 'staff', 'super_admin']) && $log->user_id !== $user->id) {
             return response()->json([
-                'message' => 'Unauthorized. You can only delete your own notes.',
+                'message' => 'Unauthorized.',
             ], 403);
         }
 
-        $log->delete();
+        $log->update([
+            'hidden_at' => now(),
+            'hidden_by' => $user->id,
+        ]);
 
-        return response()->json(['message' => 'Activity log deleted successfully']);
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'admin_note_hidden',
+            'model_type' => ActivityLog::class,
+            'model_id' => $log->id,
+            'description' => "Admin note #{$log->id} hidden by {$user->name}",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'message' => 'Note hidden successfully.',
+            'log' => $log->fresh(['user', 'hiddenByUser']),
+        ]);
+    }
+
+    public function unhide(Request $request, $id)
+    {
+        $log = ActivityLog::findOrFail($id);
+        $user = $request->user();
+
+        if (!in_array($user->role, ['admin', 'super_admin'])) {
+            return response()->json([
+                'message' => 'Unauthorized. Admin access required.',
+            ], 403);
+        }
+
+        $log->update([
+            'hidden_at' => null,
+            'hidden_by' => null,
+        ]);
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'action' => 'admin_note_unhidden',
+            'model_type' => ActivityLog::class,
+            'model_id' => $log->id,
+            'description' => "Admin note #{$log->id} restored by admin {$user->name}",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'message' => 'Note restored successfully.',
+            'log' => $log->fresh(['user', 'hiddenByUser']),
+        ]);
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        // Activity logs must NEVER be deleted under any circumstance
+        return response()->json([
+            'message' => 'Activity logs cannot be deleted.',
+        ], 405);
     }
 }

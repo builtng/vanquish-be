@@ -160,10 +160,11 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/clients/eligible-for-feedback', [ClientController::class, 'getEligibleForFeedback']);
     });
 
-    // Client photo upload (admin only)
+    // Client photo upload and restore (admin only)
     Route::middleware('admin')->group(function () {
         Route::post('/clients/{client}/upload-photo', [ClientController::class, 'uploadPhoto']);
         Route::delete('/clients/{client}/delete-photo', [ClientController::class, 'deletePhoto']);
+        Route::post('/clients/{client}/restore', [ClientController::class, 'restore']);
     });
 
     // Trainee Counsellors (staff and admin only)
@@ -213,6 +214,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/qc-applications/{id}/link', [QcApplicationController::class, 'link']);
         Route::post('/qc-applications/{id}/reject', [QcApplicationController::class, 'reject']);
         Route::post('/qc-applications/{id}/restore', [QcApplicationController::class, 'restore']);
+        Route::delete('/qc-applications/{id}', [QcApplicationController::class, 'destroy']);
     });
 
     // Consultations (staff and admin only)
@@ -233,12 +235,18 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/matching-algorithm-settings', [MatchingAlgorithmSettingController::class, 'index']);
     });
 
+    // Training Counsellor admin actions
+    Route::middleware('admin')->group(function () {
+        Route::post('/training-counsellors/{tc}/restore', [TrainingCounsellorController::class, 'restore']);
+    });
+
     // Activity Logs (staff and admin only)
     Route::middleware('staff')->group(function () {
         Route::get('/activity-logs', [ActivityLogController::class, 'index']);
         Route::post('/activity-logs', [ActivityLogController::class, 'store']);
         Route::put('/activity-logs/{id}', [ActivityLogController::class, 'update']);
-        Route::delete('/activity-logs/{id}', [ActivityLogController::class, 'destroy']);
+        Route::post('/activity-logs/{id}/hide', [ActivityLogController::class, 'hide']);
+        Route::post('/activity-logs/{id}/unhide', [ActivityLogController::class, 'unhide']);
     });
 
     // Service Management (admin only)
@@ -325,6 +333,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     // Trainee Applications (admin only)
     Route::middleware('admin')->group(function () {
         Route::delete('/trainee-applications/{trainee_application}', [TraineeApplicationController::class, 'destroy']);
+        Route::post('/trainee-applications/{trainee_application}/restore', [TraineeApplicationController::class, 'restore']);
         Route::get('/trainee-applications-settings', [TraineeApplicationController::class, 'getSettings']);
         Route::post('/trainee-applications-settings', [TraineeApplicationController::class, 'updateSettings']);
     });
@@ -337,7 +346,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
 
     // Inductions (staff and admin only)
     Route::middleware('staff')->group(function () {
-        Route::apiResource('inductions', InductionController::class);
+        Route::apiResource('inductions', InductionController::class)->except(['destroy']);
         Route::post('/inductions/{id}/add-attendees', [InductionController::class, 'addAttendees']);
     });
 

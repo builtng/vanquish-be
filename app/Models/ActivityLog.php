@@ -17,15 +17,23 @@ class ActivityLog extends Model
         'changes',
         'ip_address',
         'user_agent',
+        'hidden_at',
+        'hidden_by',
     ];
 
     protected $casts = [
         'changes' => 'array',
+        'hidden_at' => 'datetime',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function hiddenByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'hidden_by');
     }
 
     public function model(): MorphTo

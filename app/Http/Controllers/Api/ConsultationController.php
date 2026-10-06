@@ -190,18 +190,36 @@ class ConsultationController extends Controller
     {
         $consultation = Consultation::findOrFail($id);
 
+        // Release booked slot capacity if attached to a slot
+        if ($consultation->consultation_slot_id) {
+            \App\Models\ConsultationSlot::where('id', $consultation->consultation_slot_id)
+                ->where('booked_slots', '>', 0)
+                ->decrement('booked_slots');
+        }
+
+        // Cancel consultation - never delete from history!
+        $consultation->update([
+            'status' => 'cancelled',
+            'cancelled_at' => now(),
+            'cancelled_by' => $request->user()->id ?? null,
+        ]);
+
+        $clientName = $consultation->client ? $consultation->client->name : 'Client';
+        $userName = $request->user() ? $request->user()->name : 'User';
+
         ActivityLog::create([
-            'user_id' => $request->user()->id,
-            'action' => 'consultation_deleted',
+            'user_id' => $request->user()->id ?? null,
+            'action' => 'consultation_cancelled',
             'model_type' => Consultation::class,
             'model_id' => $consultation->id,
-            'description' => "Consultation deleted for client {$consultation->client->name}",
+            'description' => "Consultation #{$consultation->consultation_id} cancelled by {$userName} for client {$clientName}",
             'ip_address' => $request->ip(),
         ]);
 
-        $consultation->delete();
-
-        return response()->json(['message' => 'Consultation deleted successfully']);
+        return response()->json([
+            'message' => 'Consultation cancelled successfully',
+            'consultation' => $consultation->fresh()->load(['client', 'tc']),
+        ]);
     }
 
     public function complete(Request $request, $id)
@@ -259,18 +277,32 @@ class ConsultationController extends Controller
     public function cancel(Request $request, $id)
     {
         $consultation = Consultation::findOrFail($id);
-        $consultation->update(['status' => 'cancelled']);
+
+        if ($consultation->consultation_slot_id) {
+            \App\Models\ConsultationSlot::where('id', $consultation->consultation_slot_id)
+                ->where('booked_slots', '>', 0)
+                ->decrement('booked_slots');
+        }
+
+        $consultation->update([
+            'status' => 'cancelled',
+            'cancelled_at' => now(),
+            'cancelled_by' => $request->user()->id ?? null,
+        ]);
+
+        $clientName = $consultation->client ? $consultation->client->name : 'Client';
+        $userName = $request->user() ? $request->user()->name : 'User';
 
         ActivityLog::create([
-            'user_id' => $request->user()->id,
+            'user_id' => $request->user()->id ?? null,
             'action' => 'consultation_cancelled',
             'model_type' => Consultation::class,
             'model_id' => $consultation->id,
-            'description' => "Consultation cancelled",
+            'description' => "Consultation #{$consultation->consultation_id} cancelled by {$userName} for client {$clientName}",
             'ip_address' => $request->ip(),
         ]);
 
-        return response()->json($consultation->load(['client', 'tc']));
+        return response()->json($consultation->fresh()->load(['client', 'tc']));
     }
 
     public function reschedule(Request $request, $id)

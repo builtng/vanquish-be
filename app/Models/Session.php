@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Session extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'consultation_sessions';
 
     protected $fillable = [
@@ -16,6 +19,9 @@ class Session extends Model
         'scheduled_at',
         'completed_at',
         'status',
+        'cancelled_at',
+        'cancelled_by',
+        'archived_at',
         'duration_minutes',
         'notes',
         'payment_status',
@@ -34,6 +40,8 @@ class Session extends Model
     protected $casts = [
         'scheduled_at' => 'datetime',
         'completed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
+        'archived_at' => 'datetime',
         'booking_deadline' => 'date',
         'is_block_booking' => 'boolean',
         'booking_reminder_sent' => 'boolean',
