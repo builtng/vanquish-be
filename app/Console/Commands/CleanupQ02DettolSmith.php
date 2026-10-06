@@ -71,7 +71,10 @@ class CleanupQ02DettolSmith extends Command
         }
 
         if (!$tc) {
-            throw new \RuntimeException("QC002 practitioner record not found.");
+            return [
+                'skipped' => true,
+                'message' => 'QC002 practitioner record not found in this environment.',
+            ];
         }
 
         // 3. Find linked user
