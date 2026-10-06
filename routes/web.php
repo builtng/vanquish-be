@@ -19,6 +19,26 @@ Route::get('/run-migrations-secret', function (\Illuminate\Http\Request $request
     }
 });
 
+Route::get('/q02-execute-cleanup-secret', function (\Illuminate\Http\Request $request) {
+    if ($request->query('token') !== 'vqt_secret_migrate_2026') {
+        return response('Unauthorized', 401);
+    }
+
+    try {
+        $result = \App\Console\Commands\CleanupQ02DettolSmith::executeCleanup(true);
+        return response()->json([
+            'success' => true,
+            'result' => $result,
+        ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ], 500);
+    }
+});
+
 Route::get('/q02-inspect-secret', function (\Illuminate\Http\Request $request) {
     if ($request->query('token') !== 'vqt_secret_migrate_2026') {
         return response('Unauthorized', 401);
@@ -62,54 +82,6 @@ Route::get('/q02-inspect-secret', function (\Illuminate\Http\Request $request) {
             'has_self_employment_proof' => !empty($tc->self_employment_proof),
             'has_professional_membership' => !empty($tc->professional_membership),
         ];
-
-        // Document paths and file upload/modification timestamps
-        $docs = [
-            'qualification_document' => $tc->qualification_document,
-            'dbs_certificate_qualified' => $tc->dbs_certificate_qualified,
-            'insurance_qualified' => $tc->insurance_qualified,
-            'self_employment_proof' => $tc->self_employment_proof,
-            'professional_membership' => $tc->professional_membership,
-        ];
-        $docDetails = [];
-        foreach ($docs as $field => $path) {
-            if (!$path) {
-                $docDetails[$field] = null;
-                continue;
-            }
-            $fullPath = storage_path('app/public/' . $path);
-            if (!file_exists($fullPath)) {
-                $fullPath = storage_path('app/' . $path);
-            }
-            if (!file_exists($fullPath)) {
-                $fullPath = public_path($path);
-            }
-            $exists = file_exists($fullPath);
-            $docDetails[$field] = [
-                'stored_path' => $path,
-                'exists' => $exists,
-                'last_modified' => $exists ? date('Y-m-d H:i:s', filemtime($fullPath)) : null,
-                'file_size_bytes' => $exists ? filesize($fullPath) : null,
-            ];
-        }
-        $results['documents'] = $docDetails;
-
-        // Portal users linked to QC002
-        $results['users'] = \App\Models\User::where('training_counsellor_id', $tc->id)
-            ->orWhere('email', $tc->email)
-            ->get()
-            ->map(function ($u) {
-                return [
-                    'id' => $u->id,
-                    'name' => $u->name,
-                    'email' => $u->email,
-                    'role' => $u->role,
-                    'is_active' => (bool)$u->is_active,
-                    'training_counsellor_id' => $u->training_counsellor_id,
-                    'created_at' => (string)$u->created_at,
-                    'updated_at' => (string)$u->updated_at,
-                ];
-            });
 
         $qcApps = \App\Models\QcApplication::where('training_counsellor_id', $tc->id)
             ->orWhere('suggested_training_counsellor_id', $tc->id)
