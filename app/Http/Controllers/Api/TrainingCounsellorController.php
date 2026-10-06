@@ -945,7 +945,9 @@ class TrainingCounsellorController extends Controller
             'dbs_status' => 'nullable|string',
             'familiar_with_online_counselling' => 'nullable|string',
             'modalities' => 'nullable|array',
+            'other_modalities' => 'nullable|string',
             'experience_areas' => 'nullable|array',
+            'other_experience_areas' => 'nullable|string',
             'availability_schedule' => 'nullable|string',
         ]);
 
@@ -999,6 +1001,8 @@ class TrainingCounsellorController extends Controller
             'has_supervisor' => $validated['has_supervisor'] ?? null,
             'previous_vanquish_work' => $validated['previous_vanquish_work'] ?? null,
             'areas_to_improve' => $validated['areas_to_improve'] ?? null,
+            'other_modalities' => $validated['other_modalities'] ?? null,
+            'other_experience_areas' => $validated['other_experience_areas'] ?? null,
             'unique_trait' => $validated['unique_trait'] ?? null,
             'counsellor_training_details' => $validated['counsellor_training_details'] ?? null,
             'qualified_to_work_with' => $validated['qualified_to_work_with'] ?? [],

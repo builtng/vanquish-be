@@ -25,6 +25,8 @@ class QcApplication extends Model
         'phone',
         'previous_vanquish_work',
         'areas_to_improve',
+        'other_modalities',
+        'other_experience_areas',
         'status',
         'answers',
         'qualification_document',
@@ -53,6 +55,16 @@ class QcApplication extends Model
     public function getPreviousVanquishWorkAttribute($value): ?string
     {
         return $value ?? ($this->answers['previous_vanquish_work'] ?? null);
+    }
+
+    public function getOtherModalitiesAttribute($value): ?string
+    {
+        return $value ?? ($this->answers['other_modalities'] ?? null);
+    }
+
+    public function getOtherExperienceAreasAttribute($value): ?string
+    {
+        return $value ?? ($this->answers['other_experience_areas'] ?? null);
     }
 
     protected static function booted()
