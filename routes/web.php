@@ -1,22 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Artisan;
-
 Route::get('/', function () {
     // return view('welcome');
-});
-
-Route::get('/run-migrations-secret', function (\Illuminate\Http\Request $request) {
-    if ($request->query('token') !== 'vqt_secret_migrate_2026') {
-        return response('Unauthorized', 401);
-    }
-    try {
-        Artisan::call('migrate', ['--force' => true]);
-        return 'Migrations run successfully: <br><pre>' . Artisan::output() . '</pre>';
-    } catch (\Exception $e) {
-        return 'Error running migrations: ' . $e->getMessage();
-    }
 });
 
 Route::get('/templates/{filename}', function ($filename) {
