@@ -10,6 +10,7 @@ use App\Models\TraineeApplication;
 use App\Models\TrainingCounsellor;
 use App\Models\User;
 use App\Models\EmailLog;
+use App\Models\ActivityLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
@@ -686,6 +687,170 @@ class SameEmailSubmissionSeparationTest extends TestCase
         $this->assertEquals('Rejected', $rejectedApp->status);
         $this->assertNotNull($rejectedApp->archived_at);
         $this->assertEquals('Did not meet requirements', $rejectedApp->notes);
+    }
+
+    /**
+     * Follow-up 1: Accept must refuse an application whose status is Rejected or has archived_at set.
+     * Returns 422: "This application was rejected. Restore it before accepting."
+     */
+    public function test_Q01_cannot_accept_rejected()
+    {
+        Mail::fake();
+        $admin = User::factory()->create(['role' => 'admin', 'email' => 'admin_reject_check@example.com']);
+
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'Rejected',
+            'legal_last_name' => 'Candidate',
+            'email' => 'rejected.candidate@example.com',
+            'phone' => '07111222333',
+            'registered_address' => '1 Rejected Lane',
+            'registered_city' => 'Bristol',
+            'registered_postcode' => 'BS1 1AA',
+            'signature' => 'Rejected Candidate',
+            'signature_date' => '2026-10-01',
+        ]);
+        $appId = $res->json('application_id');
+
+        // Admin rejects the application
+        $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/reject", [
+            'reason' => 'Qualifications did not meet criteria',
+        ])->assertStatus(200);
+
+        // Attempting to accept a rejected application must return 422
+        $acceptRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/accept");
+        $acceptRes->assertStatus(422);
+        $acceptRes->assertJson([
+            'message' => 'This application was rejected. Restore it before accepting.',
+        ]);
+
+        // Restore the application and verify accept now succeeds
+        $restoreRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/restore");
+        $restoreRes->assertStatus(200);
+        $this->assertEquals('Submitted', QcApplication::find($appId)->status);
+
+        $acceptAfterRestore = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/accept");
+        $acceptAfterRestore->assertStatus(200);
+        $this->assertEquals('Accepted', QcApplication::find($appId)->status);
+    }
+
+    /**
+     * Follow-up 2: If an active practitioner already has the application's email (or there is a suggested match),
+     * Accept must stop and return 409:
+     * "A practitioner with this email already exists (<name>, <tc_id>). Use Link to existing practitioner instead."
+     * Admin can override only with an explicit force_new=true, logged in the activity log.
+     */
+    public function test_Q01_accept_blocks_duplicate_email()
+    {
+        Mail::fake();
+        $admin = User::factory()->create(['role' => 'admin', 'email' => 'admin_dup_check@example.com']);
+
+        // 1. Existing active practitioner exists with dr.jones@example.com
+        $existingTc = TrainingCounsellor::create([
+            'tc_id' => 'TC042',
+            'name' => 'Dr Indiana Jones',
+            'legal_first_name' => 'Indiana',
+            'legal_last_name' => 'Jones',
+            'email' => 'dr.jones@example.com',
+            'phone' => '07000111222',
+            'registered_address' => 'University of London',
+            'registered_city' => 'London',
+            'registered_postcode' => 'WC1E 7HU',
+            'counsellor_type' => 'Trainee',
+            'status' => 'Active',
+        ]);
+
+        // 2. Submit QC application with same email
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'legal_first_name' => 'Indiana',
+            'legal_last_name' => 'Jones',
+            'email' => 'DR.JONES@EXAMPLE.COM ',
+            'phone' => '07999888777',
+            'registered_address' => 'Archeology Dept',
+            'registered_city' => 'London',
+            'registered_postcode' => 'WC1E 7HU',
+            'signature' => 'Indiana Jones',
+            'signature_date' => '2026-10-01',
+        ]);
+        $appId = $res->json('application_id');
+        $this->assertNotNull($appId);
+
+        // 3. Accept without force_new must return 409 with exact message
+        $acceptRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/accept");
+        $acceptRes->assertStatus(409);
+        $acceptRes->assertJson([
+            'message' => 'A practitioner with this email already exists (Dr Indiana Jones, TC042). Use Link to existing practitioner instead.',
+        ]);
+
+        // Verify no second practitioner was created yet
+        $this->assertEquals(1, TrainingCounsellor::where('email', 'dr.jones@example.com')->count());
+
+        // 4. Accept WITH force_new=true succeeds and logs in ActivityLog
+        $forceRes = $this->actingAs($admin)->postJson("/api/qc-applications/{$appId}/accept", [
+            'force_new' => true,
+        ]);
+        $forceRes->assertStatus(200);
+
+        // Verify two practitioners now exist
+        $this->assertEquals(2, TrainingCounsellor::where('email', 'dr.jones@example.com')->count());
+
+        // Verify ActivityLog recorded the force_new override
+        $log = ActivityLog::where('model_id', $appId)
+            ->where('action', 'qc_application_accept_forced_new')
+            ->first();
+        $this->assertNotNull($log, 'ActivityLog should record force_new override');
+        $this->assertStringContainsString('force_new=true', $log->description);
+    }
+
+    /**
+     * Follow-up 3: In the qualified_counsellor_submission email, always send the
+     * application reference (QC-APP-0001 style), never the suggested practitioner's tc_id.
+     */
+    public function test_Q01_email_shows_application_reference()
+    {
+        Mail::fake();
+
+        // Create an existing practitioner who sends a prefill link
+        $existingTc = TrainingCounsellor::create([
+            'tc_id' => 'TC099',
+            'name' => 'Senior Trainee',
+            'email' => 'senior.trainee@example.com',
+            'counsellor_type' => 'Trainee',
+            'status' => 'Active',
+        ]);
+
+        // Submit form using tc_id param from prefill link
+        $res = $this->postJson('/api/qualified-counsellor/submit', [
+            'tc_id' => $existingTc->tc_id,
+            'legal_first_name' => 'Senior',
+            'legal_last_name' => 'Trainee',
+            'email' => 'senior.trainee@example.com',
+            'phone' => '07123456789',
+            'registered_address' => '10 High St',
+            'registered_city' => 'Manchester',
+            'registered_postcode' => 'M1 1AA',
+            'signature' => 'Senior Trainee',
+            'signature_date' => '2026-10-01',
+        ]);
+        $res->assertStatus(200);
+        $appId = $res->json('application_id');
+        $this->assertNotNull($appId);
+
+        // Expected format: QC-APP-0001 style
+        $expectedRef = 'QC-APP-' . str_pad($appId, 4, '0', STR_PAD_LEFT);
+
+        // Check the EmailLog
+        $emailLog = EmailLog::where('email', 'senior.trainee@example.com')
+            ->where('template_name', 'qualified_counsellor_submission')
+            ->latest('id')
+            ->first();
+
+        $this->assertNotNull($emailLog, 'EmailLog must be present');
+        $payload = is_array($emailLog->payload) ? $emailLog->payload : json_decode($emailLog->payload, true);
+
+        // Must be the QC-APP-0001 style, NEVER TC099
+        $this->assertEquals($expectedRef, $payload['tc_id']);
+        $this->assertEquals($expectedRef, $payload['application_reference']);
+        $this->assertNotEquals('TC099', $payload['tc_id']);
     }
 }
 

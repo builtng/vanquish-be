@@ -212,6 +212,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/qc-applications/{id}/accept', [QcApplicationController::class, 'accept']);
         Route::post('/qc-applications/{id}/link', [QcApplicationController::class, 'link']);
         Route::post('/qc-applications/{id}/reject', [QcApplicationController::class, 'reject']);
+        Route::post('/qc-applications/{id}/restore', [QcApplicationController::class, 'restore']);
     });
 
     // Consultations (staff and admin only)

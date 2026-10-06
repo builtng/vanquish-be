@@ -987,6 +987,7 @@ class TrainingCounsellorController extends Controller
                 $counsellorName = $fullName;
                 $firstName = !empty($validated['legal_first_name']) ? $validated['legal_first_name'] : explode(' ', $counsellorName)[0];
                 $submissionDate = now()->format('d M Y, H:i T');
+                $appReference = 'QC-APP-' . str_pad($qcApp->id, 4, '0', STR_PAD_LEFT);
 
                 app(\App\Services\EmailService::class)->sendAndLog(
                     $normalizedEmail,
@@ -995,7 +996,8 @@ class TrainingCounsellorController extends Controller
                         'first_name' => $firstName,
                         'counsellor_name' => $counsellorName,
                         'email' => $normalizedEmail,
-                        'tc_id' => $suggestedTc->tc_id ?? 'Pending',
+                        'tc_id' => $appReference,
+                        'application_reference' => $appReference,
                         'submission_date' => $submissionDate,
                     ],
                     $qcApp

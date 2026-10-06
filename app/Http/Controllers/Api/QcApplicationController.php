@@ -105,6 +105,39 @@ class QcApplicationController extends Controller
             ], 400);
         }
 
+        // 1. Refuse application if rejected or archived_at set
+        if ($qcApp->status === 'Rejected' || !empty($qcApp->archived_at)) {
+            return response()->json([
+                'message' => 'This application was rejected. Restore it before accepting.',
+            ], 422);
+        }
+
+        // 2. Check if an active practitioner already has this email or there is a suggested match
+        $normalizedEmail = strtolower(trim($qcApp->email ?? ''));
+        $existingTc = null;
+        if (!empty($normalizedEmail)) {
+            $existingTc = TrainingCounsellor::whereNull('archived_at')
+                ->where('email', $normalizedEmail)
+                ->first();
+        }
+        if (!$existingTc && $qcApp->suggested_training_counsellor_id) {
+            $existingTc = $qcApp->suggestedTrainingCounsellor
+                ?? TrainingCounsellor::whereNull('archived_at')->find($qcApp->suggested_training_counsellor_id);
+        }
+
+        $forceNew = $request->boolean('force_new');
+        if ($existingTc && !$forceNew) {
+            return response()->json([
+                'message' => "A practitioner with this email already exists ({$existingTc->name}, {$existingTc->tc_id}). Use Link to existing practitioner instead.",
+                'existing_tc' => [
+                    'id' => $existingTc->id,
+                    'name' => $existingTc->name,
+                    'tc_id' => $existingTc->tc_id,
+                    'email' => $existingTc->email,
+                ],
+            ], 409);
+        }
+
         // Generate unique QC id
         $maxQc = TrainingCounsellor::withTrashed()
             ->where('tc_id', 'LIKE', 'QC%')
@@ -204,6 +237,17 @@ class QcApplicationController extends Controller
             'description' => "Accepted QC application #{$qcApp->id} for {$qcApp->name}. Created practitioner {$tc->name} ({$tc->tc_id}). {$userMessage}",
             'ip_address' => $request->ip(),
         ]);
+
+        if ($existingTc && $forceNew) {
+            ActivityLog::create([
+                'user_id' => $request->user()->id ?? null,
+                'action' => 'qc_application_accept_forced_new',
+                'model_type' => QcApplication::class,
+                'model_id' => $qcApp->id,
+                'description' => "Admin override (force_new=true): created separate practitioner {$tc->name} ({$tc->tc_id}) for {$qcApp->name} despite existing match ({$existingTc->name}, {$existingTc->tc_id})",
+                'ip_address' => $request->ip(),
+            ]);
+        }
 
         return response()->json([
             'message' => 'Qualified Counsellor application accepted successfully. ' . $userMessage,
@@ -339,6 +383,35 @@ class QcApplicationController extends Controller
 
         return response()->json([
             'message' => 'Qualified Counsellor application rejected and archived.',
+            'application' => $qcApp->fresh(),
+        ]);
+    }
+
+    /**
+     * Restore a rejected / archived QC application
+     */
+    public function restore(Request $request, $id)
+    {
+        $qcApp = is_numeric($id)
+            ? QcApplication::findOrFail($id)
+            : QcApplication::where('uuid', $id)->firstOrFail();
+
+        $qcApp->update([
+            'status' => 'Submitted',
+            'archived_at' => null,
+        ]);
+
+        ActivityLog::create([
+            'user_id' => $request->user()->id ?? null,
+            'action' => 'qc_application_restored',
+            'model_type' => QcApplication::class,
+            'model_id' => $qcApp->id,
+            'description' => "Restored QC application #{$qcApp->id} for {$qcApp->name}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'message' => 'Application restored successfully.',
             'application' => $qcApp->fresh(),
         ]);
     }
