@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use App\Services\ConsultationBookingService;
+use App\Services\EmailService;
 
 class ClientConsultationSlotController extends Controller
 {
