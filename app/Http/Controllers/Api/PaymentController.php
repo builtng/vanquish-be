@@ -90,6 +90,15 @@ class PaymentController extends Controller
             }
         }
 
+        if ($request->input('payment_type') === 'consultation' && empty($request->input('consultation_slot_id'))) {
+            return response()->json([
+                'message' => 'Please choose a consultation time before paying.',
+                'errors' => [
+                    'consultation_slot_id' => ['Please choose a consultation time before paying.']
+                ]
+            ], 422);
+        }
+
         $validated = $request->validate([
             'client_id' => 'required',
             'amount' => 'required|numeric|min:0.50',

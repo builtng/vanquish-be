@@ -106,4 +106,25 @@ class PaymentControllerConsultationTest extends TestCase
         $response->assertStatus(200);
         Mail::assertSent(\App\Mail\DynamicEmail::class, 1);
     }
+
+    public function test_Q13_cannot_pay_without_slot()
+    {
+        $client = Client::create([
+            'client_id' => 'CL-Q13',
+            'name' => 'Q13 Test',
+            'email' => 'q13@example.com',
+            'stage' => 'New',
+        ]);
+
+        $response = $this->postJson('/api/payments/create-intent', [
+            'client_id' => $client->id,
+            'amount' => 25.00,
+            'payment_type' => 'consultation',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'Please choose a consultation time before paying.',
+        ]);
+    }
 }
