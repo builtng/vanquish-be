@@ -61,35 +61,17 @@ class MidRangeIntakeController extends Controller
         $counsellors = $query->get();
 
         // Fallback level 1: relax the couples/family JSON constraint
-        // (catches counsellors whose qualified_to_work_with isn't populated yet)
-        if ($counsellors->isEmpty()) {
+        // (catches counsellors whose qualified_to_work_with isn't populated yet,
+        // but only if they offer the requested tier)
+        if ($counsellors->isEmpty() && $isCouples) {
             $fallbackQuery = TrainingCounsellor::where('counsellor_type', 'Qualified')
                 ->where('status', 'Active')
                 ->where($tierColumn, true);
             $counsellors = $fallbackQuery->get();
         }
 
-        // Fallback level 2: relax the tier flag too — return all active Qualified
-        // counsellors so the page always shows real data instead of mock names
-        if ($counsellors->isEmpty()) {
-            $counsellors = TrainingCounsellor::where('counsellor_type', 'Qualified')
-                ->where('status', 'Active')
-                ->get();
-        }
-
         $results = $counsellors->map(function (TrainingCounsellor $tc) use ($validated) {
             $result = $this->scoringService->score($validated, $tc);
-
-            // Compute years of experience or reasonable default
-            $yearsExp = '5+ years experience';
-            if ($tc->joined_date) {
-                $years = (int) floor(abs(Carbon::parse($tc->joined_date)->diffInYears(now())));
-                $totalYears = max(4, $years + 4);
-                $yearsExp = $totalYears . '+ years experience';
-            }
-
-            // Professional qualification title
-            $qualTitle = $tc->professional_membership ?: ($tc->course ? 'Registered Counsellor (' . Str::limit($tc->course, 30) . ')' : 'Registered Counsellor (RPC)');
 
             return [
                 'uuid' => $tc->uuid,
@@ -98,19 +80,16 @@ class MidRangeIntakeController extends Controller
                 'abbreviated_name' => $tc->abbreviated_name,
                 'photo_url' => $tc->photo_url,
                 'gender' => $tc->gender,
-                'modality' => $tc->modality ?: 'Integrative',
+                'modality' => $tc->modality ?: null,
                 'session_price' => $tc->session_price,
-                'bio' => $tc->bio ?: 'I help individuals and couples navigate life challenges, improve communication, and build healthier emotional wellbeing.',
-                'topics_with_experience' => $tc->topics_with_experience ?: ['Anxiety', 'Depression', 'Trauma', 'Relationship Issues', 'Stress', 'Self-Esteem'],
-                'qualified_to_work_with' => $tc->qualified_to_work_with ?: ['Individuals', 'Couples'],
+                'bio' => $tc->bio ?: null,
+                'topics_with_experience' => $tc->topics_with_experience ?: null,
+                'qualified_to_work_with' => $tc->qualified_to_work_with ?: null,
                 'availability' => $tc->availability,
-                'qualification_title' => $qualTitle,
-                'years_of_experience' => $yearsExp,
                 'match_score' => $result['score'],
                 'match_breakdown' => $result['breakdown'],
                 'fit_label' => $this->fitLabel($result['score']),
                 'show_own_consultation_availability' => $tc->show_own_consultation_availability,
-                'education_credentials' => $this->buildEducationCredentials($tc),
                 'specialty' => $this->buildSpecialty($tc),
             ];
         })
@@ -253,7 +232,7 @@ class MidRangeIntakeController extends Controller
     /**
      * Derive a specialty label from who the counsellor is qualified to work with.
      */
-    private function buildSpecialty(TrainingCounsellor $tc): string
+    private function buildSpecialty(TrainingCounsellor $tc): ?string
     {
         $qualifiedWith = $tc->qualified_to_work_with ?? [];
 
@@ -264,49 +243,10 @@ class MidRangeIntakeController extends Controller
             return 'Couples Counsellor';
         }
 
-        return 'Individual Counsellor';
-    }
-
-    /**
-     * Build a human-readable education & credentials array from real stored
-     * fields on the counsellor record.  Returns a non-empty array; falls back
-     * to a sensible generic entry only if absolutely nothing is recorded.
-     */
-    private function buildEducationCredentials(TrainingCounsellor $tc): array
-    {
-        $credentials = [];
-
-        // Primary course + institution
-        if ($tc->course && $tc->institution) {
-            $credentials[] = $tc->course . ' — ' . $tc->institution;
-        } elseif ($tc->course) {
-            $credentials[] = $tc->course;
-        } elseif ($tc->institution) {
-            $credentials[] = $tc->institution;
+        if (in_array('Individuals', $qualifiedWith)) {
+            return 'Individual Counsellor';
         }
 
-        // Professional membership / registration body
-        if ($tc->professional_membership) {
-            $credentials[] = $tc->professional_membership;
-        }
-
-        // Additional training details (stored as free text; split on newlines)
-        if ($tc->counsellor_training_details) {
-            $lines = preg_split('/[\r\n]+/', $tc->counsellor_training_details);
-            foreach ($lines as $line) {
-                $line = trim($line);
-                if ($line !== '' && !in_array($line, $credentials)) {
-                    $credentials[] = $line;
-                }
-            }
-        }
-
-        // If nothing is stored, return a generic placeholder so the UI
-        // always has something meaningful to display
-        if (empty($credentials)) {
-            $credentials[] = 'Registered Professional Counsellor (RPC)';
-        }
-
-        return $credentials;
+        return null;
     }
 }
