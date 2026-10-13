@@ -51,14 +51,63 @@ class MatchScoringService
             $overall += ($category['weight'] / $totalWeight) * $category['score'];
         }
 
+        if ($this->isExcluded($clientData, $tc)) {
+            return [
+                'score' => 0,
+                'is_excluded' => true,
+                'exclusion_reason' => 'Counsellor has indicated they are not ready for this support area',
+                'breakdown' => array_map(fn ($c) => [
+                    'label' => $c['label'],
+                    'weight' => round($c['weight'], 2),
+                    'score' => 0,
+                ], $categories),
+            ];
+        }
+
         return [
             'score' => (int) round($overall),
+            'is_excluded' => false,
             'breakdown' => array_map(fn ($c) => [
                 'label' => $c['label'],
                 'weight' => round($c['weight'], 2),
                 'score' => (int) round($c['score']),
             ], $categories),
         ];
+    }
+
+    /**
+     * Determines whether a counsellor should be excluded due to having
+     * any topic in topics_not_ready_for that matches the client's support areas.
+     */
+    public function isExcluded(array $clientData, TrainingCounsellor $tc): bool
+    {
+        $rawClient = $clientData['support_areas'] ?? $clientData['primary_issues'] ?? [];
+        if (is_string($rawClient)) {
+            $rawClient = json_decode($rawClient, true) ?: [$rawClient];
+        }
+        $clientAreas = array_filter(array_map('trim', (array) $rawClient));
+
+        $rawNotReady = $tc->topics_not_ready_for ?? [];
+        if (is_string($rawNotReady)) {
+            $rawNotReady = json_decode($rawNotReady, true) ?: [$rawNotReady];
+        }
+        $notReadyAreas = array_filter(array_map('trim', (array) $rawNotReady));
+
+        if (empty($clientAreas) || empty($notReadyAreas)) {
+            return false;
+        }
+
+        foreach ($clientAreas as $ca) {
+            $cleanCa = strtolower($ca);
+            foreach ($notReadyAreas as $nr) {
+                $cleanNr = strtolower($nr);
+                if ($cleanCa === $cleanNr || str_contains($cleanCa, $cleanNr) || str_contains($cleanNr, $cleanCa)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

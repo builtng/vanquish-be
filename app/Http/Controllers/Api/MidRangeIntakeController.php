@@ -95,7 +95,9 @@ class MidRangeIntakeController extends Controller
             $counsellors = $fallbackQuery->get();
         }
 
-        $results = $counsellors->map(function (TrainingCounsellor $tc) use ($validated) {
+        $results = $counsellors
+            ->reject(fn (TrainingCounsellor $tc) => $this->scoringService->isExcluded($validated, $tc))
+            ->map(function (TrainingCounsellor $tc) use ($validated) {
             $result = $this->scoringService->score($validated, $tc);
 
             return [
