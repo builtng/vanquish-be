@@ -35,6 +35,7 @@ class DynamicEmail extends Mailable
             } else {
                 // Last resort fallback
                 $this->template = (object) [
+                    'type' => $type,
                     'subject' => 'Notification from Vanquish Therapies',
                     'body' => '<p>This is an automated notification.</p>',
                     'placeholders' => []

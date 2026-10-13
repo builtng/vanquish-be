@@ -7,12 +7,32 @@ use App\Models\ActivityLog;
 use App\Models\QcApplication;
 use App\Models\TrainingCounsellor;
 use App\Models\User;
+use App\Services\ApplicationPipelineService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class QcApplicationController extends Controller
 {
+    protected ApplicationPipelineService $pipelineService;
+
+    public function __construct(ApplicationPipelineService $pipelineService)
+    {
+        $this->pipelineService = $pipelineService;
+    }
+
+    protected function findApplication($id): QcApplication
+    {
+        $app = is_numeric($id)
+            ? QcApplication::find($id)
+            : null;
+
+        if (!$app) {
+            $app = QcApplication::where('uuid', $id)->firstOrFail();
+        }
+
+        return $app;
+    }
     /**
      * List all Qualified Counsellor applications.
      */
@@ -87,6 +107,20 @@ class QcApplicationController extends Controller
             'registered_address' => $suggestedTc->registered_address,
             'modality' => $suggestedTc->modality,
         ] : null;
+
+        $normalizedEmail = strtolower(trim($app->email ?? ''));
+        $previousSubmissions = QcApplication::where('id', '!=', $app->id)
+            ->where(function ($q) use ($app, $normalizedEmail) {
+                if ($app->person_id) {
+                    $q->where('person_id', $app->person_id);
+                }
+                if ($normalizedEmail) {
+                    $q->orWhere('email', $normalizedEmail);
+                }
+            })
+            ->orderBy('created_at', 'desc')
+            ->get();
+        $response['previous_submissions'] = $previousSubmissions;
 
         return response()->json($response);
     }
@@ -451,5 +485,118 @@ class QcApplicationController extends Controller
         ]);
 
         return response()->json(['message' => 'Application archived successfully']);
+    }
+
+    /**
+     * Send interview invitation link.
+     */
+    public function sendInterviewLink(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $result = $this->pipelineService->sendInterviewLink($app, $request->user());
+        return response()->json($result);
+    }
+
+    /**
+     * Record interview attendance (attended or no-show).
+     */
+    public function recordAttendance(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $validated = $request->validate([
+            'attended'    => 'required|boolean',
+            'notes'       => 'nullable|string|max:2000',
+            'attended_at' => 'nullable|date',
+        ]);
+
+        $result = $this->pipelineService->recordAttendance(
+            $app,
+            $validated['attended'],
+            $validated['notes'] ?? null,
+            $validated['attended_at'] ?? null,
+            $request->user()
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * Admin makes final placement/application decision.
+     */
+    public function makeDecision(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $validated = $request->validate([
+            'decision'       => 'required|in:Accepted,Rejected,Pending,Hold,Accept,Reject',
+            'induction_date' => 'nullable|string',
+            'notes'          => 'nullable|string|max:2000',
+        ]);
+
+        $result = $this->pipelineService->makeDecision(
+            $app,
+            $validated['decision'],
+            $validated['induction_date'] ?? null,
+            $validated['notes'] ?? null,
+            $request->user()
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * Send induction invitation specifically.
+     */
+    public function sendInductionInvite(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $result = $this->pipelineService->sendInductionInvite(
+            $app,
+            $request->input('induction_date'),
+            $request->user()
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * Record induction attendance (attended or no-show).
+     */
+    public function recordInductionAttendance(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $validated = $request->validate([
+            'attended' => 'required|boolean',
+            'notes'    => 'nullable|string',
+        ]);
+
+        $result = $this->pipelineService->recordInductionAttendance(
+            $app,
+            $validated['attended'],
+            $validated['notes'] ?? null,
+            $request->user()
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * Update application status through pipeline stages.
+     */
+    public function updateStatus(Request $request, $id)
+    {
+        $app = $this->findApplication($id);
+        $validated = $request->validate([
+            'status'         => 'required|string',
+            'induction_date' => 'nullable|string',
+        ]);
+
+        $result = $this->pipelineService->updateStatus(
+            $app,
+            $validated['status'],
+            $validated['induction_date'] ?? null,
+            $request->user()
+        );
+
+        return response()->json($result['application']);
     }
 }

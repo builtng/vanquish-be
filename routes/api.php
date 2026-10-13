@@ -216,6 +216,16 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/qc-applications/{id}/reject', [QcApplicationController::class, 'reject']);
         Route::post('/qc-applications/{id}/restore', [QcApplicationController::class, 'restore']);
         Route::delete('/qc-applications/{id}', [QcApplicationController::class, 'destroy']);
+
+        // Pipeline actions (reused from trainee pipeline)
+        Route::post('/qc-applications/{id}/send-interview-link', [QcApplicationController::class, 'sendInterviewLink']);
+        Route::post('/qc-applications/{id}/invite-stage-three', [QcApplicationController::class, 'sendInterviewLink']);
+        Route::post('/qc-applications/{id}/invite', [QcApplicationController::class, 'sendInterviewLink']);
+        Route::post('/qc-applications/{id}/attendance', [QcApplicationController::class, 'recordAttendance']);
+        Route::post('/qc-applications/{id}/decision', [QcApplicationController::class, 'makeDecision']);
+        Route::post('/qc-applications/{id}/induction-invite', [QcApplicationController::class, 'sendInductionInvite']);
+        Route::post('/qc-applications/{id}/induction-attendance', [QcApplicationController::class, 'recordInductionAttendance']);
+        Route::match(['POST', 'PUT'], '/qc-applications/{id}/status', [QcApplicationController::class, 'updateStatus']);
     });
 
     // Consultations (staff and admin only)

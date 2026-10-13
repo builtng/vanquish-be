@@ -20,14 +20,17 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use App\Services\EmailService;
+use App\Services\ApplicationPipelineService;
 
 class TraineeApplicationController extends Controller
 {
     protected $emailService;
+    protected $pipelineService;
 
-    public function __construct(EmailService $emailService)
+    public function __construct(EmailService $emailService, ApplicationPipelineService $pipelineService)
     {
         $this->emailService = $emailService;
+        $this->pipelineService = $pipelineService;
     }
     /**
      * Display a listing of applications.
@@ -511,52 +514,19 @@ class TraineeApplicationController extends Controller
         }
 
         try {
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_stage_three_invite', [
-                'first_name'     => $traineeApplication->first_name,
-                'full_name'      => $traineeApplication->first_name . ' ' . $traineeApplication->last_name,
-                'booking_link'   => TraineeApplicationSetting::getByKey('placement_interview_link', config('services.trafft.booking_url', 'https://vanquishtherapies.co.uk/placement-interview/')),
-                'induction_date' => TraineeApplicationSetting::getByKey('next_induction_date', config('services.trafft.next_induction_date', 'Monday, 19th January, 10:00am')),
-            ], $traineeApplication);
+            $result = $this->pipelineService->sendInterviewLink($traineeApplication, request()->user());
 
-            $oldStatus = $traineeApplication->status;
-            $zoomLink = TraineeApplicationSetting::getByKey('default_zoom_link', config('services.trafft.default_zoom_link', 'https://zoom.us/j/vanquishtherapies'));
-            
-            $traineeApplication->update([
-                'status' => 'Stage 3 Interview Booked',
-                'interview_data' => empty($traineeApplication->interview_data) ? [
-                    'trafft' => [
-                        'appointment_id' => 'MANUAL-' . strtoupper(\Illuminate\Support\Str::random(6)),
-                        'meeting_id' => rand(100000000, 999999999),
-                        'date' => 'TBC',
-                        'time' => 'TBC',
-                        'host_name' => 'Vanquish Admin',
-                        'zoom_link' => $zoomLink,
-                    ]
-                ] : $traineeApplication->interview_data
+            return response()->json([
+                'message' => 'Stage 3 invitation sent successfully',
+                'status'  => $result['status'],
+                'application' => $result['application'],
             ]);
-
-            try {
-                ActivityLog::create([
-                    'user_id' => optional(request()->user())->id,
-                    'action' => 'trainee_application_status_updated',
-                    'model_type' => TraineeApplication::class,
-                    'model_id' => $traineeApplication->id,
-                    'description' => "Application status updated from {$oldStatus} to Stage 3 Interview Booked for " . ($traineeApplication->first_name . ' ' . $traineeApplication->last_name),
-                    'changes' => ['old_status' => $oldStatus, 'new_status' => 'Stage 3 Interview Booked'],
-                    'ip_address' => request()->ip(),
-                ]);
-            } catch (\Exception $e) {
-                Log::error("Failed to log trainee status update in sendStageThreeInvite: " . $e->getMessage());
-            }
-        } catch (\Exception $e) {
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 400);
+        } catch (\Throwable $e) {
             Log::error("Failed to manual send Stage 3 invite: " . $e->getMessage());
             return response()->json(['message' => 'Failed to send invitation.'], 500);
         }
-
-        return response()->json([
-            'message' => 'Stage 3 invitation sent successfully',
-            'status'  => $traineeApplication->fresh()->status,
-        ]);
     }
 
     /**
@@ -572,49 +542,15 @@ class TraineeApplicationController extends Controller
             'attended_at'   => 'nullable|date',
         ]);
 
-        $status = $validated['attended'] ? 'Interview Attended' : 'Interview No Show';
+        $result = $this->pipelineService->recordAttendance(
+            $traineeApplication,
+            $validated['attended'],
+            $validated['notes'] ?? null,
+            $validated['attended_at'] ?? null,
+            $request->user()
+        );
 
-        $interviewData = is_array($traineeApplication->interview_data)
-            ? $traineeApplication->interview_data
-            : [];
-
-        $traineeApplication->update([
-            'status'         => $status,
-            'interview_data' => array_merge($interviewData, [
-                'attendance' => [
-                    'attended'    => $validated['attended'],
-                    'attended_at' => $validated['attended_at'] ?? now()->toIso8601String(),
-                    'notes'       => $validated['notes'] ?? null,
-                    'recorded_by' => $request->user()->id,
-                ]
-            ]),
-        ]);
-
-        try {
-            ActivityLog::create([
-                'user_id'     => optional($request->user())->id,
-                'action'      => 'trainee_interview_attendance_recorded',
-                'model_type'  => TraineeApplication::class,
-                'model_id'    => $traineeApplication->id,
-                'description' => "Interview attendance recorded ({$status}) for " . ($traineeApplication->name ?? 'applicant'),
-                'changes'     => ['status' => $status, 'attended' => $validated['attended']],
-                'ip_address'  => $request->ip(),
-            ]);
-        } catch (\Exception $e) {
-            Log::error("Failed to log trainee interview attendance: " . $e->getMessage());
-        }
-
-        if (!$validated['attended']) {
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_interview_not_attended', [
-                'first_name' => $traineeApplication->first_name,
-            ], $traineeApplication);
-        }
-
-        return response()->json([
-            'message'     => 'Attendance recorded',
-            'status'      => $status,
-            'application' => $traineeApplication->fresh(),
-        ]);
+        return response()->json($result);
     }
 
     /**
@@ -630,101 +566,15 @@ class TraineeApplicationController extends Controller
             'notes'          => 'nullable|string|max:2000',
         ]);
 
-        $decision = $validated['decision'];
-        if ($decision === 'Accept') {
-            $decision = 'Accepted';
-        } elseif ($decision === 'Reject') {
-            $decision = 'Rejected';
-        } elseif ($decision === 'Hold') {
-            $decision = 'Pending';
-        }
+        $result = $this->pipelineService->makeDecision(
+            $traineeApplication,
+            $validated['decision'],
+            $validated['induction_date'] ?? null,
+            $validated['notes'] ?? null,
+            $request->user()
+        );
 
-        $oldStatus = $traineeApplication->status;
-        $newStatus = $decision === 'Pending' ? 'Hold' : $decision;
-
-        $interviewData = is_array($traineeApplication->interview_data) ? $traineeApplication->interview_data : [];
-        $interviewData['decision'] = [
-            'outcome'        => $decision,
-            'decided_at'     => now()->toIso8601String(),
-            'decided_by'     => $request->user()->id,
-            'induction_date' => $validated['induction_date'] ?? null,
-            'notes'          => $validated['notes'] ?? null,
-        ];
-
-        $traineeApplication->update([
-            'status'         => $newStatus,
-            'interview_data' => $interviewData,
-        ]);
-
-        try {
-            ActivityLog::create([
-                'user_id'     => optional($request->user())->id,
-                'action'      => 'trainee_placement_decision',
-                'model_type'  => TraineeApplication::class,
-                'model_id'    => $traineeApplication->id,
-                'description' => "Placement decision '{$decision}' recorded for " . ($traineeApplication->name ?? 'applicant'),
-                'changes'     => ['decision' => $decision, 'old_status' => $oldStatus, 'new_status' => $newStatus],
-                'ip_address'  => $request->ip(),
-            ]);
-        } catch (\Exception $e) {
-            Log::error("Failed to log trainee placement decision: " . $e->getMessage());
-        }
-
-        // Initialize onboarding data if accepted
-        if ($decision === 'Accepted') {
-            $traineeApplication->update([
-                'onboarding_data' => [
-                    'checklist' => [
-                        'four_way_agreement' => false,
-                        'therapy_form'       => false,
-                        'induction_attended' => false,
-                        'portal_setup'       => false,
-                        'policies_signed'    => false,
-                    ],
-                    'induction_date' => $validated['induction_date'] ?? 'To be confirmed',
-                ]
-            ]);
-        }
-
-        // Send emails (kept from previous step)
-        if ($decision === 'Accepted') {
-            $companySettings = \Illuminate\Support\Facades\DB::table('company_settings')->pluck('value', 'key')->toArray();
-            
-            $therapyFormUrl = ($companySettings['use_internal_agreement_form'] ?? '0') === '1'
-                                ? rtrim(config('app.frontend_url'), '/') . '/therapy-form'
-                                : ($companySettings['jotform_therapy_form_url'] ?? 'https://form.jotform.com/241002800146035');
-
-            if (empty($traineeApplication->placement_response_token)) {
-                $traineeApplication->update(['placement_response_token' => \Illuminate\Support\Str::random(40)]);
-            }
-            $responseUrl = rtrim(config('app.frontend_url'), '/') . '/placement-response/' . $traineeApplication->placement_response_token;
-
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_placement_acceptance', [
-                'first_name'          => $traineeApplication->first_name,
-                'induction_date'      => $validated['induction_date'] ?? 'Monday, 19th January, 10:00am',
-                'induction_zoom_link' => config('services.trafft.default_zoom_link', 'https://zoom.us/j/vanquish-induction'),
-                'meeting_id'          => \App\Models\TraineeApplicationSetting::getByKey('induction_meeting_id', config('services.trafft.induction_meeting_id', '216 124 5208')),
-                'passcode'            => \App\Models\TraineeApplicationSetting::getByKey('induction_passcode', config('services.trafft.induction_passcode', '')),
-                'therapy_form_url'    => $therapyFormUrl,
-            ], $traineeApplication);
-
-            $frontendUrl = rtrim(config('app.frontend_url'), '/');
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_onboarding_paperwork', [
-                'first_name'              => $traineeApplication->first_name,
-                'agreement_download_link' => $frontendUrl . '/templates/4-way-agreement-trainee.docx',
-                'therapy_form_url'        => $therapyFormUrl,
-            ], $traineeApplication);
-        } elseif ($decision === 'Rejected') {
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_placement_rejection', [
-                'first_name' => $traineeApplication->first_name,
-            ], $traineeApplication);
-        }
-
-        return response()->json([
-            'message'     => "Decision recorded: {$decision}",
-            'status'      => $newStatus,
-            'application' => $traineeApplication->fresh(),
-        ]);
+        return response()->json($result);
     }
 
     /**
@@ -767,41 +617,14 @@ class TraineeApplicationController extends Controller
             'notes'    => 'nullable|string',
         ]);
 
-        $wasAlreadyAttended = $traineeApplication->status === 'Induction Attended';
+        $result = $this->pipelineService->recordInductionAttendance(
+            $traineeApplication,
+            $validated['attended'],
+            $validated['notes'] ?? null,
+            $request->user()
+        );
 
-        $onboarding = $traineeApplication->onboarding_data ?? [];
-        $onboarding['checklist']['induction_attended'] = $validated['attended'];
-        $onboarding['induction_notes'] = $validated['notes'];
-
-        $traineeApplication->update([
-            'status'          => $validated['attended'] ? 'Induction Attended' : 'Induction No-Show',
-            'onboarding_data' => $onboarding
-        ]);
-
-        try {
-            ActivityLog::create([
-                'user_id'     => optional($request->user())->id,
-                'action'      => 'trainee_induction_attendance',
-                'model_type'  => TraineeApplication::class,
-                'model_id'    => $traineeApplication->id,
-                'description' => "Induction attendance recorded for " . ($traineeApplication->name ?? 'applicant'),
-                'ip_address'  => $request->ip(),
-            ]);
-        } catch (\Exception $e) {
-            Log::error("Failed to log trainee induction attendance: " . $e->getMessage());
-        }
-
-        if ($validated['attended'] && !$wasAlreadyAttended) {
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_induction_completed', [
-                'first_name' => $traineeApplication->first_name,
-            ], $traineeApplication);
-        } elseif (!$validated['attended']) {
-            $this->emailService->sendAndLog($traineeApplication->email, 'trainee_induction_not_attended', [
-                'first_name' => $traineeApplication->first_name,
-            ], $traineeApplication);
-        }
-
-        return response()->json(['message' => 'Induction status recorded', 'application' => $traineeApplication->fresh()]);
+        return response()->json($result);
     }
 
     /**

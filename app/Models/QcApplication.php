@@ -38,14 +38,43 @@ class QcApplication extends Model
         'signature',
         'signature_date',
         'notes',
+        'interview_data',
+        'onboarding_data',
+        'induction_date',
+        'placement_response_token',
         'archived_at',
     ];
 
     protected $casts = [
         'answers' => 'array',
+        'interview_data' => 'array',
+        'onboarding_data' => 'array',
         'signature_date' => 'date',
         'archived_at' => 'datetime',
     ];
+
+    public function getFirstNameAttribute(): string
+    {
+        if (!empty($this->legal_first_name)) {
+            return $this->legal_first_name;
+        }
+        if (!empty($this->name)) {
+            return explode(' ', trim($this->name))[0];
+        }
+        return '';
+    }
+
+    public function getLastNameAttribute(): string
+    {
+        if (!empty($this->legal_last_name)) {
+            return $this->legal_last_name;
+        }
+        if (!empty($this->name)) {
+            $parts = explode(' ', trim($this->name));
+            return count($parts) > 1 ? implode(' ', array_slice($parts, 1)) : '';
+        }
+        return '';
+    }
 
     public function getAreasToImproveAttribute($value): ?string
     {
