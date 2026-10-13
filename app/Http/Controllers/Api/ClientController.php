@@ -17,8 +17,10 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Barryvdh\DomPDF\Facade\Pdf;
+use App\Models\TrainingCounsellor;
 use App\Services\EmailService;
 use App\Services\CompanySettingsService;
+use App\Services\MatchScoringService;
 
 class ClientController extends Controller
 {
@@ -656,6 +658,142 @@ class ClientController extends Controller
             ->whereNull('matched_tc_id')
             ->count();
         return response()->json(['count' => $count]);
+    }
+
+    /**
+     * Compute suggested counsellor matches for a client using MatchScoringService.
+     * Uses VQT's six weights from MatchingAlgorithmSetting.
+     */
+    public function matchSuggestions(Request $request, MatchScoringService $scoringService, $client = null)
+    {
+        // Authorization check
+        if (!Gate::allows('viewAny', Client::class)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $clientId = $client ?: $request->input('client_id') ?: $request->input('uuid');
+        $clientModel = null;
+        if ($clientId) {
+            $clientModel = Client::where('uuid', $clientId)
+                ->orWhere('client_id', $clientId)
+                ->orWhere('id', $clientId)
+                ->first();
+        }
+
+        if (!$clientModel && empty($request->input('client'))) {
+            return response()->json(['message' => 'Client not found'], 404);
+        }
+
+        $clientData = $clientModel ? [
+            'service_type' => $clientModel->service_type,
+            'support_areas' => $clientModel->primary_issues ?: [],
+            'primary_issues' => $clientModel->primary_issues ?: [],
+            'modality_preference' => $clientModel->modality_preference,
+            'availability' => $clientModel->availability ?: [],
+            'gender_preference' => $clientModel->gender_preference,
+            'age_preference' => $clientModel->age_preference,
+            'ethnicity_preference' => $clientModel->ethnicity_preference,
+            'orientation_preference' => $clientModel->orientation_preference,
+            'is_couples' => (bool) $clientModel->is_couples,
+        ] : (array) $request->input('client');
+
+        $clientService = strtolower(trim((string) ($clientData['service_type'] ?? '')));
+        $isLowCost = in_array($clientService, ['low cost', 'low-cost']);
+        $isQualified = in_array($clientService, ['mid range', 'mid-range', 'coaching', 'high range', 'high-range']);
+
+        $counsellorsQuery = TrainingCounsellor::whereNull('archived_at')
+            ->where('status', 'Active');
+
+        if ($isLowCost) {
+            $counsellorsQuery->where('counsellor_type', 'Trainee');
+        } elseif ($isQualified) {
+            $counsellorsQuery->where('counsellor_type', 'Qualified');
+        }
+
+        if ($request->has('counsellor_ids')) {
+            $ids = (array) $request->input('counsellor_ids');
+            $counsellorsQuery->where(function ($q) use ($ids) {
+                $q->whereIn('id', $ids)->orWhereIn('uuid', $ids);
+            });
+        }
+
+        $counsellors = $counsellorsQuery->get();
+        $limit = $request->has('limit') ? (int) $request->input('limit') : 3;
+
+        $results = $counsellors
+            ->filter(function (TrainingCounsellor $tc) {
+                $maxClients = $tc->max_clients ?: 6;
+                return ($tc->current_clients ?: 0) < $maxClients;
+            })
+            ->reject(fn (TrainingCounsellor $tc) => $scoringService->isExcluded($clientData, $tc))
+            ->map(function (TrainingCounsellor $tc) use ($clientData, $scoringService) {
+                $result = $scoringService->score($clientData, $tc);
+
+                $breakdownObj = [];
+                foreach ($result['breakdown'] as $b) {
+                    $key = match ($b['label']) {
+                        'Availability Match' => 'availability',
+                        'Modality Match' => 'modalityMatch',
+                        'Gender Preference' => 'genderPreference',
+                        'Ethnicity Preference' => 'ethnicityPreference',
+                        'Sexual Orientation Preference' => 'sexualOrientationPreference',
+                        'Age Preference' => 'agePreference',
+                        default => Str::camel($b['label']),
+                    };
+                    $breakdownObj[$key] = [
+                        'label' => $b['label'],
+                        'score' => (int) round(($b['score'] / 100) * $b['weight']),
+                        'max' => (int) round($b['weight']),
+                        'percentage' => (int) round($b['score']),
+                        'matched' => (bool) ($b['score'] > 0),
+                        'detail' => "{$b['label']}: {$b['score']}% (Weight: {$b['weight']}%)",
+                    ];
+                }
+
+                $flags = [];
+                $availCategory = collect($result['breakdown'])->firstWhere('label', 'Availability Match');
+                if ($availCategory && $availCategory['score'] === 0 && !empty($clientData['availability'])) {
+                    $flags[] = 'No overlapping availability with this client';
+                }
+                $maxClients = $tc->max_clients ?: 6;
+                if (($tc->current_clients ?: 0) / $maxClients >= 0.9) {
+                    $flags[] = 'Practitioner is near full caseload capacity';
+                }
+
+                return [
+                    'id' => $tc->uuid ?: $tc->id,
+                    'uuid' => $tc->uuid ?: $tc->id,
+                    'tc_id' => $tc->tc_id,
+                    'name' => $tc->name,
+                    'first_name' => $tc->first_name,
+                    'counsellor_type' => $tc->counsellor_type,
+                    'counsellorType' => $tc->counsellor_type,
+                    'modality' => $tc->modality ?: 'N/A',
+                    'matchScore' => $result['score'],
+                    'match_score' => $result['score'],
+                    'matchBreakdown' => $breakdownObj,
+                    'match_breakdown' => $result['breakdown'],
+                    'flags' => $flags,
+                    'isExcluded' => false,
+                    'currentClients' => $tc->current_clients ?: 0,
+                    'current_clients' => $tc->current_clients ?: 0,
+                    'max_clients' => $maxClients,
+                    'availability' => (($tc->current_clients ?: 0) / $maxClients < 0.8) ? 'High' : 'Low',
+                    'rawAvailability' => $tc->availability ?: [],
+                ];
+            })
+            ->sortByDesc('matchScore')
+            ->values();
+
+        if ($limit > 0) {
+            $results = $results->take($limit)->values();
+        }
+
+        return response()->json([
+            'client_id' => $clientModel ? $clientModel->id : null,
+            'client_uuid' => $clientModel ? $clientModel->uuid : null,
+            'suggestions' => $results,
+        ]);
     }
 
     /**

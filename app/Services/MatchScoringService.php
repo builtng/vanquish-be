@@ -6,27 +6,19 @@ use App\Models\MatchingAlgorithmSetting;
 use App\Models\TrainingCounsellor;
 
 /**
- * Computes a 0-100 client-facing match score (plus per-category breakdown)
- * between an in-progress intake submission and a Qualified counsellor, for
- * the Mid Range / Coaching & Counselling "Filtered Counsellors" step.
+ * Computes a 0-100 match score (plus per-category breakdown) between
+ * client requirements and a counsellor.
  *
- * Reads the admin-configurable weights from MatchingAlgorithmSetting for the
- * six categories it already defines (availability, modality, gender,
- * ethnicity, sexual_orientation, age), rescaled to make room for two
- * additional categories the settings model doesn't cover yet — areas of
- * support and specialty (couples/family capability) — at fixed weights.
- * This is separate, new code: it does not read from or modify the staff
- * dashboard's existing client-side matching algorithm.
+ * Uses VQT's six admin-configurable weights exactly from MatchingAlgorithmSetting:
+ * Availability (40), Modality (20), Gender (20), Ethnicity (10),
+ * Sexual Orientation (5), Age (5).
  */
 class MatchScoringService
 {
-    private const AREAS_OF_SUPPORT_WEIGHT = 15.0;
-    private const SPECIALTY_WEIGHT = 10.0;
-
     /**
      * @param array $clientData Accumulated intake form fields: support_areas,
      *              availability, gender_preference, age_preference,
-     *              ethnicity_preference, orientation_preference, is_couples.
+     *              ethnicity_preference, orientation_preference, modality_preference.
      * @param TrainingCounsellor $tc
      * @return array{score:int, breakdown: array<int, array{label:string, weight:float, score:int}>}
      */
@@ -36,9 +28,7 @@ class MatchScoringService
 
         $categories = [
             ['label' => 'Availability Match', 'weight' => $weights['availability'], 'score' => $this->scoreAvailability($clientData, $tc)],
-            ['label' => 'Areas of Support Match', 'weight' => self::AREAS_OF_SUPPORT_WEIGHT, 'score' => $this->scoreAreasOfSupport($clientData, $tc)],
             ['label' => 'Modality Match', 'weight' => $weights['modality'], 'score' => $this->scoreModality($clientData, $tc)],
-            ['label' => 'Specialty Match', 'weight' => self::SPECIALTY_WEIGHT, 'score' => $this->scoreSpecialty($clientData, $tc)],
             ['label' => 'Gender Preference', 'weight' => $weights['gender'], 'score' => $this->scorePreference($clientData['gender_preference'] ?? null, $tc->gender)],
             ['label' => 'Ethnicity Preference', 'weight' => $weights['ethnicity'], 'score' => $this->scorePreference($clientData['ethnicity_preference'] ?? null, $tc->ethnicity)],
             ['label' => 'Sexual Orientation Preference', 'weight' => $weights['sexual_orientation'], 'score' => $this->scorePreference($clientData['orientation_preference'] ?? null, $tc->sexual_orientation)],
@@ -77,17 +67,19 @@ class MatchScoringService
 
     /**
      * Determines whether a counsellor should be excluded due to having
-     * any topic in topics_not_ready_for that matches the client's support areas.
+     * any topic in topics_not_ready_for matching the client's support areas.
+     * Matches on exact area names only (trimmed, case-insensitive).
+     * Substring / partial word matching is NOT used.
      */
     public function isExcluded(array $clientData, TrainingCounsellor $tc): bool
     {
-        $rawClient = $clientData['support_areas'] ?? $clientData['primary_issues'] ?? [];
+        $rawClient = $clientData['support_areas'] ?? $clientData['primary_issues'] ?? $clientData['primaryIssues'] ?? [];
         if (is_string($rawClient)) {
             $rawClient = json_decode($rawClient, true) ?: [$rawClient];
         }
         $clientAreas = array_filter(array_map('trim', (array) $rawClient));
 
-        $rawNotReady = $tc->topics_not_ready_for ?? [];
+        $rawNotReady = $tc->topics_not_ready_for ?? $tc->topicsNotReadyFor ?? [];
         if (is_string($rawNotReady)) {
             $rawNotReady = json_decode($rawNotReady, true) ?: [$rawNotReady];
         }
@@ -98,10 +90,17 @@ class MatchScoringService
         }
 
         foreach ($clientAreas as $ca) {
-            $cleanCa = strtolower($ca);
+            $cleanCa = strtolower(trim($ca));
+            if ($cleanCa === '') {
+                continue;
+            }
             foreach ($notReadyAreas as $nr) {
-                $cleanNr = strtolower($nr);
-                if ($cleanCa === $cleanNr || str_contains($cleanCa, $cleanNr) || str_contains($cleanNr, $cleanCa)) {
+                $cleanNr = strtolower(trim($nr));
+                if ($cleanNr === '') {
+                    continue;
+                }
+                // Exact area name match only (trimmed, case-insensitive)
+                if ($cleanCa === $cleanNr) {
                     return true;
                 }
             }
@@ -117,7 +116,7 @@ class MatchScoringService
     {
         $settings = MatchingAlgorithmSetting::first();
 
-        $raw = [
+        return [
             'availability' => (float) ($settings->availability_weight ?? 40),
             'modality' => (float) ($settings->modality_weight ?? 20),
             'gender' => (float) ($settings->gender_weight ?? 20),
@@ -125,17 +124,6 @@ class MatchScoringService
             'sexual_orientation' => (float) ($settings->sexual_orientation_weight ?? 5),
             'age' => (float) ($settings->age_weight ?? 5),
         ];
-
-        $rawTotal = array_sum($raw) ?: 100;
-        // Rescale the six configured weights to make room for the two fixed
-        // categories (areas of support + specialty) while keeping their
-        // relative proportions intact.
-        $remaining = 100 - self::AREAS_OF_SUPPORT_WEIGHT - self::SPECIALTY_WEIGHT;
-        foreach ($raw as $key => $value) {
-            $raw[$key] = ($value / $rawTotal) * $remaining;
-        }
-
-        return $raw;
     }
 
     private const ABSTRACT_SLOT_EXPANSIONS = [
