@@ -25,7 +25,7 @@ class TraineeAttendanceEmailsTest extends TestCase
 
         $html = $mailable->render();
         $this->assertStringContainsString('Sarah', $html);
-        $this->assertStringContainsString('We are sorry you were not able to attend your interview, to comply with GPDR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor', $html);
+        $this->assertStringContainsString('We are sorry you were not able to attend your interview, to comply with GDPR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor', $html);
     }
 
     public function test_induction_not_attended_email_rendering(): void
@@ -40,7 +40,7 @@ class TraineeAttendanceEmailsTest extends TestCase
 
         $html = $mailable->render();
         $this->assertStringContainsString('Michael', $html);
-        $this->assertStringContainsString('We are sorry you were not able to attend your induction, to comply with GPDR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor', $html);
+        $this->assertStringContainsString('We are sorry you were not able to attend your induction, to comply with GDPR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor', $html);
     }
 
     public function test_recording_interview_no_show_triggers_email(): void

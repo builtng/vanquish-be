@@ -877,7 +877,7 @@ class DynamicEmail extends Mailable
                 'body' => '
 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
     <p>Dear {{first_name}},</p>
-    <p>We are sorry you were not able to attend your interview, to comply with GPDR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor.</p>
+    <p>We are sorry you were not able to attend your interview, to comply with GDPR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor.</p>
     <p>Kind regards,</p>
     <p><strong>Nicole McLaren</strong><br>
     SAR and Compliance Team | Vanquish Therapies<br>
@@ -892,7 +892,7 @@ class DynamicEmail extends Mailable
                 'body' => '
 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
     <p>Dear {{first_name}},</p>
-    <p>We are sorry you were not able to attend your induction, to comply with GPDR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor.</p>
+    <p>We are sorry you were not able to attend your induction, to comply with GDPR regulations, your information has been deleted, we wish you all the best in your journey to becoming a qualified counsellor.</p>
     <p>Kind regards,</p>
     <p><strong>Nicole McLaren</strong><br>
     SAR and Compliance Team | Vanquish Therapies<br>
