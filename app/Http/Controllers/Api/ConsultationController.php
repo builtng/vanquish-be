@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use App\Mail\DynamicEmail;
 
 use App\Services\EmailService;
+use Carbon\Carbon;
 
 class ConsultationController extends Controller
 {
@@ -350,39 +351,94 @@ class ConsultationController extends Controller
         return response()->json($consultation->load(['client', 'tc']));
     }
 
+    public function markNoShow(Request $request, $id)
+    {
+        $consultation = Consultation::findOrFail($id);
+
+        if ($consultation->consultation_slot_id) {
+            \App\Models\ConsultationSlot::where('id', $consultation->consultation_slot_id)
+                ->where('booked_slots', '>', 0)
+                ->decrement('booked_slots');
+        }
+
+        $consultation->update([
+            'status' => 'no_show',
+        ]);
+
+        $clientName = $consultation->client ? $consultation->client->name : 'Client';
+        $userName = $request->user() ? $request->user()->name : 'User';
+
+        ActivityLog::create([
+            'user_id' => $request->user()->id ?? null,
+            'action' => 'consultation_no_show',
+            'model_type' => Consultation::class,
+            'model_id' => $consultation->id,
+            'description' => "Consultation #{$consultation->consultation_id} marked as Did Not Attend by {$userName} for client {$clientName}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'message' => 'Consultation marked as Did Not Attend successfully',
+            'consultation' => $consultation->fresh()->load(['client', 'tc']),
+        ]);
+    }
+
     public function stats(Request $request)
     {
-        $today = now()->startOfDay();
-        $todayEnd = now()->endOfDay();
-        $startOfMonth = now()->startOfMonth();
+        $nowUk = Carbon::now('Europe/London');
+        $todayStartUk = $nowUk->copy()->startOfDay();
+        $todayEndUk = $nowUk->copy()->endOfDay();
+        $startOfWeekUk = $nowUk->copy()->startOfWeek();
+        $endOfWeekUk = $nowUk->copy()->endOfWeek();
+        $startOfMonthUk = $nowUk->copy()->startOfMonth();
 
         $stats = [
             'today_count' => Consultation::where('status', 'scheduled')
                 ->whereHas('client')
-                ->where(function ($query) use ($today) {
-                    $query->whereDate('scheduled_at', $today)
-                        ->orWhere(function ($q) use ($today) {
+                ->where(function ($query) use ($todayStartUk, $todayEndUk) {
+                    $query->whereBetween('scheduled_at', [$todayStartUk, $todayEndUk])
+                        ->orWhere(function ($q) use ($todayStartUk, $todayEndUk) {
                             $q->whereNull('scheduled_at')
-                                ->whereDate('created_at', $today);
+                                ->whereBetween('created_at', [$todayStartUk, $todayEndUk]);
                         });
                 })
                 ->count(),
 
             'upcoming_count' => Consultation::where('status', 'scheduled')
                 ->whereHas('client')
+                ->where('scheduled_at', '>', $nowUk)
+                ->count(),
+
+            'past_not_completed_count' => Consultation::where('status', 'scheduled')
+                ->whereHas('client')
+                ->where(function ($q) use ($nowUk) {
+                    $q->where('scheduled_at', '<=', $nowUk)
+                        ->orWhere(function ($sub) use ($nowUk) {
+                            $sub->whereNull('scheduled_at')
+                                ->where('created_at', '<=', $nowUk);
+                        });
+                })
                 ->count(),
 
             'this_week_count' => Consultation::where('status', 'scheduled')
                 ->whereHas('client')
-                ->whereDate('scheduled_at', '>=', $today)
+                ->whereBetween('scheduled_at', [$startOfWeekUk, $endOfWeekUk])
                 ->count(),
 
             'completed_this_month' => Consultation::where('status', 'completed')
                 ->whereHas('client')
-                ->where('completed_at', '>=', $startOfMonth)
+                ->where('completed_at', '>=', $startOfMonthUk)
                 ->count(),
 
             'pending_payment' => Consultation::where('payment_status', 'pending')
+                ->whereHas('client')
+                ->count(),
+
+            'rescheduled_count' => Consultation::where('status', 'rescheduled')
+                ->whereHas('client')
+                ->count(),
+
+            'cancelled_count' => Consultation::where('status', 'cancelled')
                 ->whereHas('client')
                 ->count(),
         ];

@@ -235,6 +235,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/consultations/{consultation}/complete', [ConsultationController::class, 'complete']);
         Route::post('/consultations/{consultation}/cancel', [ConsultationController::class, 'cancel']);
         Route::post('/consultations/{consultation}/reschedule', [ConsultationController::class, 'reschedule']);
+        Route::post('/consultations/{consultation}/no-show', [ConsultationController::class, 'markNoShow']);
     });
 
     // Pending Matches (staff and admin only)
