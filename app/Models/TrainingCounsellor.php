@@ -142,9 +142,6 @@ class TrainingCounsellor extends Model
      */
     public function getFirstNameAttribute()
     {
-        if (!empty($this->attributes['legal_first_name'])) {
-            return $this->attributes['legal_first_name'];
-        }
         if (!empty($this->attributes['name'])) {
             $cleaned = preg_replace('/^(Dr|Mr|Mrs|Ms|Miss|Prof)\.?\s+/i', '', trim($this->attributes['name']));
             return explode(' ', $cleaned)[0];

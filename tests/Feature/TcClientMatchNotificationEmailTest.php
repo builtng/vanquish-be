@@ -192,7 +192,7 @@ class TcClientMatchNotificationEmailTest extends TestCase
         $this->assertEquals('John', $tc2->first_name);
 
         $tc3 = new TrainingCounsellor(['name' => 'Robert', 'legal_first_name' => 'Rob']);
-        $this->assertEquals('Rob', $tc3->first_name);
+        $this->assertEquals('Robert', $tc3->first_name);
     }
 
     public function test_client_abbreviated_name_formats_correctly(): void
