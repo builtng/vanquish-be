@@ -30,7 +30,7 @@ class SendInterviewReminder
 
     protected $application;
 
-    public function __construct(TraineeApplication $application)
+    public function __construct(\Illuminate\Database\Eloquent\Model $application)
     {
         $this->application = $application;
     }
@@ -56,9 +56,13 @@ class SendInterviewReminder
 
         $trafft = $interviewData['trafft'] ?? [];
 
+        $isQc = $this->application instanceof \App\Models\QcApplication
+            || ($this->application->getTable() ?? null) === 'qc_applications';
+        $template = $isQc ? 'qc_interview_reminder' : 'trainee_interview_reminder';
+
         $sent = app(\App\Services\EmailService::class)->sendAndLog(
             $this->application->email,
-            'trainee_interview_reminder',
+            $template,
             [
                 'first_name'   => $this->application->first_name,
                 'scheduled_at' => $trafft['formatted_datetime'] ?? ($trafft['start_time'] ?? 'Your scheduled time'),

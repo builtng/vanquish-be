@@ -78,12 +78,21 @@ class TrafftWebhookController extends Controller
 
             $email = strtolower(trim($email));
 
-            // ── 4. Find matching trainee application ──────────────────────
+            // ── 4. Find matching trainee or QC application ───────────────
             $application = TraineeApplication::where('email', $email)->first();
             if (!$application) {
                 $uuid = $this->extractMetadata($payload, 'uuid');
                 if ($uuid) {
                     $application = TraineeApplication::where('uuid', $uuid)->first();
+                }
+            }
+            if (!$application) {
+                $application = \App\Models\QcApplication::where('email', $email)->first();
+                if (!$application) {
+                    $uuid = $this->extractMetadata($payload, 'uuid');
+                    if ($uuid) {
+                        $application = \App\Models\QcApplication::where('uuid', $uuid)->first();
+                    }
                 }
             }
 
@@ -117,10 +126,11 @@ class TrafftWebhookController extends Controller
             ]);
 
             // ── 8. Activity log ───────────────────────────────────────────
+            $isQc = $application instanceof \App\Models\QcApplication;
             ActivityLog::create([
                 'user_id'     => null,
                 'action'      => 'trafft_interview_booked',
-                'model_type'  => TraineeApplication::class,
+                'model_type'  => get_class($application),
                 'model_id'    => $application->id,
                 'description' => "Stage 3 interview booked via Trafft for {$application->first_name} {$application->last_name} on {$booking['formatted_datetime']}",
                 'changes'     => $booking,
@@ -135,9 +145,10 @@ class TrafftWebhookController extends Controller
             ]);
 
             // ── 9. Step 7: Send booking confirmation email ────────────────
+            $confirmedTemplate = $isQc ? 'qc_interview_confirmed' : 'trainee_interview_confirmed';
             app(\App\Services\EmailService::class)->sendAndLog(
                 $application->email,
-                'trainee_interview_confirmed',
+                $confirmedTemplate,
                 [
                     'first_name'   => $application->first_name,
                     'full_name'    => $application->first_name . ' ' . $application->last_name,

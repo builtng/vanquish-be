@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SendInterviewReminder;
 use App\Mail\DynamicEmail;
+use App\Models\EmailTemplate;
 use App\Models\Person;
 use App\Models\QcApplication;
+use App\Models\TraineeApplication;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -16,7 +19,7 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
 
     /**
      * Test Q19: Send interview link for qualified counsellor application.
-     * Reuses the trainee pipeline action, stages, and emails.
+     * Reuses the pipeline stages and sends qc_stage_three_invite.
      */
     public function test_Q19_qc_interview_link_sent(): void
     {
@@ -47,10 +50,10 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
         $this->assertNotEmpty($freshApp->interview_data);
         $this->assertNotEmpty($freshApp->interview_data['trafft']['zoom_link']);
 
-        // Verify the trainee pipeline email template 'trainee_stage_three_invite' was reused
+        // Verify the QC pipeline email template 'qc_stage_three_invite' was sent
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
             return $mail->hasTo($qcApp->email) &&
-                   $mail->template->type === 'trainee_stage_three_invite' &&
+                   $mail->template->type === 'qc_stage_three_invite' &&
                    $mail->data['first_name'] === 'Rachel';
         });
 
@@ -130,7 +133,7 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
 
         // App 2 triggered interview not attended email
         Mail::assertSent(DynamicEmail::class, function ($mail) {
-            return $mail->template->type === 'trainee_interview_not_attended';
+            return $mail->template->type === 'qc_interview_not_attended';
         });
 
         // 4. Advance App 1: Accept & Invite to Induction
@@ -195,20 +198,20 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
         $this->assertEquals('Monday, 23rd March, 10:00am', $fresh->induction_date);
         $this->assertNotEmpty($fresh->placement_response_token);
 
-        // Verify trainee placement acceptance (induction invite) and paperwork emails were sent
+        // Verify QC placement acceptance (induction invite) and paperwork emails were sent
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
             return $mail->hasTo($qcApp->email) &&
-                   $mail->template->type === 'trainee_placement_acceptance' &&
+                   $mail->template->type === 'qc_placement_acceptance' &&
                    $mail->data['first_name'] === 'Phoebe' &&
                    $mail->data['induction_date'] === 'Monday, 23rd March, 10:00am';
         });
 
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
             return $mail->hasTo($qcApp->email) &&
-                   $mail->template->type === 'trainee_onboarding_paperwork';
+                   $mail->template->type === 'qc_onboarding_paperwork';
         });
 
-        // Test recording induction attendance triggers trainee_induction_completed
+        // Test recording induction attendance triggers qc_induction_completed
         $this->actingAs($admin)->postJson("/api/qc-applications/{$qcApp->id}/induction-attendance", [
             'attended' => true,
             'notes'    => 'Attended fully',
@@ -217,10 +220,10 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
         $this->assertEquals('Induction Attended', $qcApp->fresh()->status);
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
             return $mail->hasTo($qcApp->email) &&
-                   $mail->template->type === 'trainee_induction_completed';
+                   $mail->template->type === 'qc_induction_completed';
         });
 
-        // Test induction no-show triggers trainee_induction_not_attended
+        // Test induction no-show triggers qc_induction_not_attended
         $qcAppNoShow = QcApplication::create([
             'legal_first_name' => 'Joey',
             'legal_last_name'  => 'Tribbiani',
@@ -237,7 +240,269 @@ class Q19QcPipelineInterviewInductionTest extends TestCase
         $this->assertEquals('Induction No-Show', $qcAppNoShow->fresh()->status);
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcAppNoShow) {
             return $mail->hasTo($qcAppNoShow->email) &&
-                   $mail->template->type === 'trainee_induction_not_attended';
+                   $mail->template->type === 'qc_induction_not_attended';
         });
+    }
+
+    /**
+     * Test Q19: QC interview attendance no-show triggers qc_interview_not_attended.
+     */
+    public function test_Q19_qc_interview_no_show_sends_qc_template(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $qcApp = QcApplication::create([
+            'legal_first_name' => 'Chandler',
+            'legal_last_name'  => 'Bing',
+            'name'             => 'Chandler Bing',
+            'email'            => 'chandler.bing@example.com',
+            'status'           => 'Stage 3 Interview Booked',
+        ]);
+
+        $res = $this->actingAs($admin)->postJson("/api/qc-applications/{$qcApp->id}/attendance", [
+            'attended' => false,
+            'notes'    => 'Did not show up for Zoom interview',
+        ]);
+
+        $res->assertStatus(200);
+        $this->assertEquals('Interview No Show', $qcApp->fresh()->status);
+
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
+            return $mail->hasTo($qcApp->email) &&
+                   $mail->template->type === 'qc_interview_not_attended';
+        });
+    }
+
+    /**
+     * Test Q19: QC rejection triggers qc_placement_rejection.
+     */
+    public function test_Q19_qc_rejection_sends_qc_template(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $qcApp = QcApplication::create([
+            'legal_first_name' => 'Gunther',
+            'legal_last_name'  => 'Central',
+            'name'             => 'Gunther Central',
+            'email'            => 'gunther@example.com',
+            'status'           => 'Interview Attended',
+        ]);
+
+        $res = $this->actingAs($admin)->postJson("/api/qc-applications/{$qcApp->id}/decision", [
+            'decision' => 'Rejected',
+            'notes'    => 'Not suitable at this time',
+        ]);
+
+        $res->assertStatus(200);
+        $this->assertEquals('Rejected', $qcApp->fresh()->status);
+
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
+            return $mail->hasTo($qcApp->email) &&
+                   $mail->template->type === 'qc_placement_rejection';
+        });
+    }
+
+    /**
+     * Test Q19: Editing a qc_* template does NOT affect trainee templates or emails.
+     */
+    public function test_Q19_editing_qc_template_does_not_change_trainee_email(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        // 1. Ensure templates exist in DB
+        $qcTemplate = EmailTemplate::firstOrCreate(
+            ['type' => 'qc_stage_three_invite'],
+            [
+                'subject' => 'Original QC Subject',
+                'body'    => '<p>Original QC Body for {{first_name}}</p>',
+                'placeholders' => ['first_name'],
+            ]
+        );
+
+        $traineeTemplate = EmailTemplate::firstOrCreate(
+            ['type' => 'trainee_stage_three_invite'],
+            [
+                'subject' => 'Original Trainee Subject',
+                'body'    => '<p>Original Trainee Body for {{first_name}}</p>',
+                'placeholders' => ['first_name'],
+            ]
+        );
+
+        // 2. Edit the qc_* template via API
+        $editResponse = $this->actingAs($admin)->putJson("/api/email-templates/qc_stage_three_invite", [
+            'subject' => 'CUSTOM QC SUBJECT: Welcome Qualified Counsellor',
+            'body'    => '<p>Custom QC body for {{first_name}}</p>',
+        ]);
+        $editResponse->assertStatus(200);
+
+        // 3. Confirm trainee template is untouched
+        $traineeTemplate->refresh();
+        $this->assertEquals('Original Trainee Subject', $traineeTemplate->subject);
+        $this->assertEquals('<p>Original Trainee Body for {{first_name}}</p>', $traineeTemplate->body);
+
+        // 4. Send interview link to QC application
+        $qcApp = QcApplication::create([
+            'legal_first_name' => 'Dr. Richard',
+            'legal_last_name'  => 'Burke',
+            'name'             => 'Dr. Richard Burke',
+            'email'            => 'richard.burke@example.com',
+            'status'           => 'Submitted',
+        ]);
+
+        $this->actingAs($admin)->postJson("/api/qc-applications/{$qcApp->id}/send-interview-link")
+            ->assertStatus(200);
+
+        // Verify QC applicant got the custom QC template
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
+            return $mail->hasTo($qcApp->email) &&
+                   $mail->template->type === 'qc_stage_three_invite' &&
+                   $mail->template->subject === 'CUSTOM QC SUBJECT: Welcome Qualified Counsellor';
+        });
+
+        // 5. Send interview link to Trainee application
+        $traineeApp = TraineeApplication::create([
+            'first_name' => 'Emma',
+            'last_name'  => 'Geller-Green',
+            'email'      => 'emma@example.com',
+            'status'     => 'Submitted',
+        ]);
+
+        $pipelineService = app(\App\Services\ApplicationPipelineService::class);
+        $pipelineService->sendInterviewLink($traineeApp, $admin);
+
+        // Verify Trainee applicant got the unedited trainee template
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($traineeApp) {
+            return $mail->hasTo($traineeApp->email) &&
+                   $mail->template->type === 'trainee_stage_three_invite' &&
+                   $mail->template->subject === 'Original Trainee Subject';
+        });
+    }
+
+    /**
+     * Test Q19: Trainee journey continues sending trainee_* templates exactly as before.
+     */
+    public function test_Q19_trainee_journey_sends_same_emails_as_before(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $pipelineService = app(\App\Services\ApplicationPipelineService::class);
+
+        $traineeApp = TraineeApplication::create([
+            'first_name' => 'Ben',
+            'last_name'  => 'Geller',
+            'email'      => 'ben.geller@example.com',
+            'status'     => 'Submitted',
+        ]);
+
+        // 1. Send interview link
+        $pipelineService->sendInterviewLink($traineeApp, $admin);
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_stage_three_invite');
+
+        // 2. Attendance no-show
+        $pipelineService->recordAttendance($traineeApp, false, 'Did not attend', null, $admin);
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_interview_not_attended');
+
+        // 3. Make decision accepted
+        $pipelineService->makeDecision($traineeApp, 'Accepted', 'Monday 20th', null, $admin);
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_placement_acceptance');
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_onboarding_paperwork');
+
+        // 4. Record induction attended
+        $pipelineService->recordInductionAttendance($traineeApp, true, 'Great job', $admin);
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_induction_completed');
+
+        // 5. Test trainee rejection
+        $traineeApp2 = TraineeApplication::create([
+            'first_name' => 'Carol',
+            'last_name'  => 'Willick',
+            'email'      => 'carol@example.com',
+            'status'     => 'Interview Attended',
+        ]);
+        $pipelineService->makeDecision($traineeApp2, 'Rejected', null, 'Not right fit', $admin);
+        Mail::assertSent(DynamicEmail::class, fn($m) => $m->template->type === 'trainee_placement_rejection');
+    }
+
+    /**
+     * Test Q19: Trafft booking and interview reminder send qc_* templates for QC applications.
+     */
+    public function test_Q19_qc_trafft_booking_and_reminder_send_qc_templates(): void
+    {
+        Mail::fake();
+
+        $qcApp = QcApplication::create([
+            'legal_first_name' => 'Janice',
+            'legal_last_name'  => 'Hosenstein',
+            'name'             => 'Janice Hosenstein',
+            'email'            => 'janice@example.com',
+            'status'           => 'Submitted',
+        ]);
+
+        // Simulate Trafft booking webhook for QC application
+        $payload = [
+            'event'    => 'appointment.created',
+            'customer' => ['email' => 'janice@example.com'],
+            'booking'  => [
+                'id'         => 'TRAFFT-QC-999',
+                'start'      => '2026-11-01 10:00:00',
+                'zoom_link'  => 'https://zoom.us/j/qc123',
+                'meeting_id' => '123456789',
+            ],
+            'employee' => ['name' => 'Interviewer Admin'],
+            'service'  => ['name' => 'QC Interview'],
+        ];
+
+        $res = $this->postJson('/api/trafft/webhook', $payload);
+        $res->assertStatus(200);
+
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
+            return $mail->hasTo($qcApp->email) &&
+                   $mail->template->type === 'qc_interview_confirmed';
+        });
+
+        // Test SendInterviewReminder job sends qc_interview_reminder
+        SendInterviewReminder::dispatchSync($qcApp->fresh());
+
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($qcApp) {
+            return $mail->hasTo($qcApp->email) &&
+                   $mail->template->type === 'qc_interview_reminder';
+        });
+    }
+
+    /**
+     * Test Q19: Email templates API returns clear human-readable names and paired ordering.
+     */
+    public function test_Q19_email_templates_api_ordering_and_names(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $res = $this->actingAs($admin)->getJson('/api/email-templates');
+        $res->assertStatus(200);
+
+        $templates = $res->json();
+        $this->assertIsArray($templates);
+
+        // Find trainee and qc invite templates
+        $traineeInvite = collect($templates)->firstWhere('type', 'trainee_stage_three_invite');
+        $qcInvite = collect($templates)->firstWhere('type', 'qc_stage_three_invite');
+
+        $this->assertNotNull($traineeInvite);
+        $this->assertNotNull($qcInvite);
+
+        // Check human-readable names
+        $this->assertEquals('Trainee: Interview Invitation', $traineeInvite['name']);
+        $this->assertEquals('Qualified Counsellor: Interview Invitation', $qcInvite['name']);
+
+        // Check adjacent ordering in the list
+        $traineeIndex = array_search('trainee_stage_three_invite', array_column($templates, 'type'));
+        $qcIndex = array_search('qc_stage_three_invite', array_column($templates, 'type'));
+
+        $this->assertEquals($traineeIndex + 1, $qcIndex, 'QC template should be positioned next to Trainee template');
     }
 }

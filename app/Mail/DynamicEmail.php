@@ -96,12 +96,21 @@ class DynamicEmail extends Mailable
             'trainee_stage_two_invite',
             'trainee_video_interview_received',
             'trainee_stage_three_invite',
+            'qc_stage_three_invite',
             'trainee_interview_reminder',
+            'qc_interview_reminder',
             'trainee_placement_acceptance',
+            'qc_placement_acceptance',
             'trainee_placement_rejection',
+            'qc_placement_rejection',
             'trainee_induction_completed',
+            'qc_induction_completed',
             'trainee_interview_not_attended',
+            'qc_interview_not_attended',
             'trainee_induction_not_attended',
+            'qc_induction_not_attended',
+            'qc_interview_confirmed',
+            'qc_onboarding_paperwork',
             'trainee_portal_invite',
             'counsellor_portal_invite',
             'tc_late_to_session',
@@ -144,10 +153,13 @@ class DynamicEmail extends Mailable
     private array $selfHeaderedTypes = [
         'admin_video_review_notification',
         'trainee_interview_confirmed',
+        'qc_interview_confirmed',
         'trainee_interview_reminder',
+        'qc_interview_reminder',
         'trainee_portal_invite',
         'counsellor_portal_invite',
         'trainee_onboarding_paperwork',
+        'qc_onboarding_paperwork',
         'message_waiting_counsellor',
         'message_waiting_admin',
     ];
@@ -181,7 +193,7 @@ class DynamicEmail extends Mailable
         $attachments = [];
 
         $type = $this->template->type ?? null;
-        if ($type === 'trainee_placement_acceptance') {
+        if ($type === 'trainee_placement_acceptance' || $type === 'qc_placement_acceptance') {
             $directory = storage_path('app/templates');
             if (!is_dir($directory)) {
                 mkdir($directory, 0755, true);
@@ -196,7 +208,7 @@ class DynamicEmail extends Mailable
                 ->withMime('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         }
 
-        if ($type === 'trainee_induction_completed') {
+        if ($type === 'trainee_induction_completed' || $type === 'qc_induction_completed') {
             $directory = storage_path('app/templates');
             if (!is_dir($directory)) {
                 mkdir($directory, 0755, true);
@@ -238,7 +250,7 @@ class DynamicEmail extends Mailable
 
     private function getDefaults()
     {
-        return [
+        $defaults = [
             'password_reset' => [
                 'subject' => 'Password Reset Request - Vanquish Therapies',
                 'body' => '<h1 style="margin: 0 0 20px 0; color: #1e293b; font-size: 24px; font-weight: 700; line-height: 1.3;">Password Reset Request</h1><p style="font-size: 16px; margin: 0 0 16px 0; color: #333333;">Hello <strong>{{name}}</strong>,</p><p style="margin: 0 0 16px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your Vanquish Therapies account.</p><p style="margin: 24px 0;"><a href="{{reset_link}}" style="display:inline-block;padding:12px 24px;background-color:#6f1d56;color:white;text-decoration:none;border-radius:8px;font-weight:bold;">Reset My Password</a></p><p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px; line-height: 1.5;">This password reset link will expire in {{expires_in}}. If you did not request a password reset, no further action is required and your account remains secure.</p><p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 24px;">Warm regards,<br>The Vanquish Therapies Team</p>',
@@ -902,6 +914,59 @@ class DynamicEmail extends Mailable
 </div>',
                 'placeholders' => ['first_name']
             ],
+            'trainee_onboarding_paperwork' => [
+                'subject' => 'Action Required: Onboarding Paperwork',
+                'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;">
+  <div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 40px 32px; border-radius: 12px 12px 0 0; text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 26px;">Action Required</h1>
+    <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 15px;">Complete Your Onboarding — Vanquish Therapies</p>
+  </div>
+  <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none;">
+    <p style="font-size: 16px; margin-top: 0;">Dear <strong>{{first_name}}</strong>,</p>
+    <p>To finalise your placement, please complete the two items below <strong>before</strong> your induction date:</p>
+
+    <div style="margin: 20px 0;">
+      <div style="padding: 16px; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; margin-bottom: 12px;">
+        <p style="margin: 0; font-size: 14px;"><strong>1. Sign the 4-Way Agreement</strong></p>
+        <p style="margin: 4px 0 12px; font-size: 12px; color: #92400e;">Please download the attached agreement, obtain signatures from your Tutor and Clinical Supervisor, and return it to us.</p>
+        <a href="{{agreement_download_link}}" style="font-size:13px; font-weight:bold; color:#b45309; text-decoration:underline;">📥 Download 4-Way Agreement (.docx)</a>
+      </div>
+
+      <div style="padding: 16px; background: #fdf2f8; border: 1px solid #e8d5e4; border-radius: 8px;">
+        <p style="margin: 0; font-size: 14px;"><strong>2. Confirm Personal Therapy</strong></p>
+        <p style="margin: 4px 0 12px; font-size: 12px; color: #6f1d56;">As per clinical standards, please confirm your therapy hours via the form below.</p>
+        <a href="{{therapy_form_url}}" target="_blank" style="display:inline-block;padding:10px 20px;background:#6f1d56;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:13px;">📝 Complete Therapy Form</a>
+      </div>
+    </div>
+
+    <p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 32px;">Best regards,<br><span style="font-weight: normal; color: #777; font-size: 13px;">Compliance &amp; Clinical Lead</span></p>
+  </div>
+  <div style="background: #f8fafc; padding: 16px 32px; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none; text-align: center;">
+    <p style="font-size: 11px; color: #94a3b8; margin: 0;">© Vanquish Therapies Ltd. All rights reserved.</p>
+  </div>
+</div>',
+                'placeholders' => ['first_name', 'agreement_download_link', 'therapy_form_url']
+            ],
         ];
+
+        $qcCopies = [
+            'qc_stage_three_invite' => 'trainee_stage_three_invite',
+            'qc_interview_confirmed' => 'trainee_interview_confirmed',
+            'qc_interview_reminder' => 'trainee_interview_reminder',
+            'qc_placement_acceptance' => 'trainee_placement_acceptance',
+            'qc_onboarding_paperwork' => 'trainee_onboarding_paperwork',
+            'qc_placement_rejection' => 'trainee_placement_rejection',
+            'qc_induction_completed' => 'trainee_induction_completed',
+            'qc_interview_not_attended' => 'trainee_interview_not_attended',
+            'qc_induction_not_attended' => 'trainee_induction_not_attended',
+        ];
+
+        foreach ($qcCopies as $qcType => $traineeType) {
+            if (isset($defaults[$traineeType])) {
+                $defaults[$qcType] = $defaults[$traineeType];
+            }
+        }
+
+        return $defaults;
     }
 }

@@ -32,6 +32,7 @@ class Client extends Model
         'age_preference',
         'ethnicity_preference',
         'orientation_preference',
+        'modality_preference',
         'stage',
         'status',
         'service_type',

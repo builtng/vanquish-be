@@ -31,6 +31,7 @@ class ClientIntakeForm extends Model
         'age_preference',
         'ethnicity_preference',
         'orientation_preference',
+        'modality_preference',
         'hear_about_us',
         'referral_reason',
         'referrer_name',

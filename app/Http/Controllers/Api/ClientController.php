@@ -130,6 +130,7 @@ class ClientController extends Controller
             'age_preference' => 'nullable|string|max:255',
             'ethnicity_preference' => 'nullable|string|max:255',
             'orientation_preference' => 'nullable|string|max:255',
+            'modality_preference' => 'nullable|string|max:255',
             'service_type' => 'nullable|string|max:255',
             'primary_issues' => 'nullable|array|max:40',
             'primary_issues.*' => 'string|max:255',
@@ -227,6 +228,7 @@ class ClientController extends Controller
             $client->age_preference = $client->age_preference ?: ($intake->age_preference ?: 'No preference');
             $client->ethnicity_preference = $client->ethnicity_preference ?: ($intake->ethnicity_preference ?: 'No preference');
             $client->orientation_preference = $client->orientation_preference ?: ($intake->orientation_preference ?: 'No preference');
+            $client->modality_preference = $client->modality_preference ?: ($intake->modality_preference ?: 'Unsure');
             
             if (empty($client->primary_issues) && !empty($intake->support_areas)) {
                 $client->primary_issues = $intake->support_areas;
@@ -328,6 +330,7 @@ class ClientController extends Controller
             'age_preference' => 'nullable|string|max:255',
             'ethnicity_preference' => 'nullable|string|max:255',
             'orientation_preference' => 'nullable|string|max:255',
+            'modality_preference' => 'nullable|string|max:255',
             'service_type' => 'nullable|string',
             'primary_issues' => 'nullable|array|max:40',
             'primary_issues.*' => 'string|max:255',

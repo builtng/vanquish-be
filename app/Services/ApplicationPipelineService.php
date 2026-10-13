@@ -37,7 +37,7 @@ class ApplicationPipelineService
             config('services.trafft.next_induction_date', 'Monday, 19th January, 10:00am')
         );
 
-        $this->emailService->sendAndLog($application->email, 'trainee_stage_three_invite', [
+        $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_stage_three_invite'), [
             'first_name'     => $application->first_name,
             'full_name'      => trim($application->first_name . ' ' . $application->last_name),
             'booking_link'   => $bookingLink,
@@ -112,7 +112,7 @@ class ApplicationPipelineService
         );
 
         if (!$attended) {
-            $this->emailService->sendAndLog($application->email, 'trainee_interview_not_attended', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_interview_not_attended'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
@@ -189,7 +189,7 @@ class ApplicationPipelineService
         if ($decision === 'Accepted') {
             $this->sendAcceptanceAndPaperworkEmails($application, $inductionDate);
         } elseif ($decision === 'Rejected') {
-            $this->emailService->sendAndLog($application->email, 'trainee_placement_rejection', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_placement_rejection'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
@@ -243,11 +243,11 @@ class ApplicationPipelineService
         );
 
         if ($attended && !$wasAlreadyAttended) {
-            $this->emailService->sendAndLog($application->email, 'trainee_induction_completed', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_induction_completed'), [
                 'first_name' => $application->first_name,
             ], $application);
         } elseif (!$attended) {
-            $this->emailService->sendAndLog($application->email, 'trainee_induction_not_attended', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_induction_not_attended'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
@@ -313,28 +313,28 @@ class ApplicationPipelineService
 
         // TRIGGER EMAIL: If Rejected
         if ($status === 'Rejected' && $oldStatus !== 'Rejected') {
-            $this->emailService->sendAndLog($application->email, 'trainee_placement_rejection', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_placement_rejection'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
 
         // TRIGGER EMAIL: If Interview No Show
         if ($status === 'Interview No Show' && $oldStatus !== 'Interview No Show') {
-            $this->emailService->sendAndLog($application->email, 'trainee_interview_not_attended', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_interview_not_attended'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
 
         // TRIGGER EMAIL: If Induction No-Show
         if ($status === 'Induction No-Show' && $oldStatus !== 'Induction No-Show') {
-            $this->emailService->sendAndLog($application->email, 'trainee_induction_not_attended', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_induction_not_attended'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
 
         // TRIGGER EMAIL: If Induction Attended
         if ($status === 'Induction Attended' && $oldStatus !== 'Induction Attended') {
-            $this->emailService->sendAndLog($application->email, 'trainee_induction_completed', [
+            $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_induction_completed'), [
                 'first_name' => $application->first_name,
             ], $application);
         }
@@ -365,7 +365,7 @@ class ApplicationPipelineService
             ?? $application->induction_date
             ?? TraineeApplicationSetting::getByKey('next_induction_date', config('services.trafft.next_induction_date', 'Monday, 19th January, 10:00am'));
 
-        $this->emailService->sendAndLog($application->email, 'trainee_placement_acceptance', [
+        $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_placement_acceptance'), [
             'first_name'          => $application->first_name,
             'induction_date'      => $effectiveInductionDate,
             'induction_zoom_link' => config('services.trafft.default_zoom_link', 'https://zoom.us/j/vanquish-induction'),
@@ -375,11 +375,31 @@ class ApplicationPipelineService
         ], $application);
 
         $frontendUrl = rtrim(config('app.frontend_url'), '/');
-        $this->emailService->sendAndLog($application->email, 'trainee_onboarding_paperwork', [
+        $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_onboarding_paperwork'), [
             'first_name'              => $application->first_name,
             'agreement_download_link' => $frontendUrl . '/templates/4-way-agreement-trainee.docx',
             'therapy_form_url'        => $therapyFormUrl,
         ], $application);
+    }
+
+    /**
+     * Check if application is a Qualified Counsellor application.
+     */
+    protected function isQcApplication(Model $application): bool
+    {
+        return $application instanceof \App\Models\QcApplication
+            || ($application->getTable() ?? null) === 'qc_applications'
+            || ($application->application_type ?? null) === 'Qualified';
+    }
+
+    /**
+     * Resolve the appropriate template based on application type.
+     */
+    protected function getTemplate(Model $application, string $traineeTemplate): string
+    {
+        return $this->isQcApplication($application)
+            ? str_replace('trainee_', 'qc_', $traineeTemplate)
+            : $traineeTemplate;
     }
 
     /**

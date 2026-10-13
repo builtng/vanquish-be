@@ -17,7 +17,58 @@ class EmailTemplateController extends Controller
         // Ensure default templates exist
         $this->ensureDefaultTemplatesExist();
 
-        return response()->json(EmailTemplate::orderBy('created_at', 'desc')->get());
+        $order = [
+            'trainee_stage_three_invite',
+            'qc_stage_three_invite',
+            'trainee_interview_confirmed',
+            'qc_interview_confirmed',
+            'trainee_interview_reminder',
+            'qc_interview_reminder',
+            'trainee_interview_not_attended',
+            'qc_interview_not_attended',
+            'trainee_placement_acceptance',
+            'qc_placement_acceptance',
+            'trainee_onboarding_paperwork',
+            'qc_onboarding_paperwork',
+            'trainee_placement_rejection',
+            'qc_placement_rejection',
+            'trainee_induction_completed',
+            'qc_induction_completed',
+            'trainee_induction_not_attended',
+            'qc_induction_not_attended',
+            'trainee_initial_invite',
+            'trainee_application_received',
+            'qualified_counsellor_submission',
+            'trainee_stage_two_invite',
+            'trainee_video_interview_received',
+            'trainee_portal_invite',
+            'counsellor_portal_invite',
+            'induction_invitation',
+            'qualified_form',
+            'booking_notification',
+            'tc_welcome',
+            'tc_match_notification',
+            'generic_tc_email',
+            'tc_late_to_session',
+            'tc_missed_psg',
+            'tc_missed_session',
+            'tc_late_session_notes',
+            'tc_session_disruption',
+            'message_waiting_counsellor',
+            'message_waiting_admin',
+            'password_reset',
+            'consultation_booking_confirmation',
+            'session_reminder',
+            'booking_deadline_reminder',
+            'generic_client_email',
+        ];
+
+        $orderMap = array_flip($order);
+        $templates = EmailTemplate::all()->sortBy(function ($t) use ($orderMap) {
+            return $orderMap[$t->type] ?? (1000 + $t->id);
+        })->values();
+
+        return response()->json($templates);
     }
 
     /**
@@ -108,7 +159,7 @@ class EmailTemplateController extends Controller
 
     private function getDefaults()
     {
-        return [
+        $defaults = [
             'intake_submission' => [
                 'subject' => 'We have received your intake form',
                 'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;"><div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 36px 32px; border-radius: 12px 12px 0 0; text-align: center;"><h1 style="color: white; margin: 0; font-size: 24px;">Form Received</h1><p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Vanquish Therapies</p></div><div style="background: #ffffff; padding: 32px; border: 1px solid #e8e8e8; border-top: none;"><p style="font-size: 16px; margin-top: 0;">Hello <strong>{{client_name}}</strong>,</p><p>Thank you for submitting your intake form. We will review it and get back to you soon.</p><p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 24px;">The Vanquish Therapies Team</p></div><div style="background: #f5f5f5; padding: 16px 32px; text-align: center; border: 1px solid #e8e8e8; border-top: none; border-radius: 0 0 12px 12px;"><p style="font-size: 11px; color: #aaa; margin: 0;">© Vanquish Therapies Ltd. All rights reserved.</p></div></div>',
@@ -570,6 +621,67 @@ class EmailTemplateController extends Controller
 </div>',
                 'placeholders' => ['first_name']
             ],
+            'trainee_interview_reminder' => [
+                'subject' => '⏰ 48-Hour Reminder: Your Placement Interview Tomorrow',
+                'body' => '
+<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;">
+  <div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 36px 32px; border-radius: 12px 12px 0 0; text-align: center;">
+    <div style="font-size: 40px; margin-bottom: 8px;">⏰</div>
+    <h1 style="color: white; margin: 0; font-size: 24px;">Interview Reminder</h1>
+    <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Vanquish Therapies — Placement Interview</p>
+  </div>
+  <div style="background: #ffffff; padding: 32px; border: 1px solid #e8e8e8; border-top: none;">
+    <p style="font-size: 16px; margin-top: 0;">Dear <strong>{{first_name}}</strong>,</p>
+    <p>This is a <strong>friendly reminder</strong> that your Vanquish Therapies Placement Interview is coming up soon. We look forward to speaking with you!</p>
+    <div style="background: #f0e6ed; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center; border: 2px solid #d8b4d0;">
+      <p style="margin: 0 0 4px; font-size: 13px; color: #6f1d56; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Your Interview</p>
+      <p style="margin: 0; font-size: 22px; font-weight: bold; color: #4a0d3a;">{{scheduled_at}}</p>
+    </div>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="{{zoom_link}}" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#6f1d56,#9b2c7e);color:white;text-decoration:none;border-radius:10px;font-weight:bold;font-size:15px;">🔗 Join via Zoom</a>
+      <p style="margin: 8px 0 0; font-size: 12px; color: #888;">Click this link at the time of your interview</p>
+    </div>
+    <h2 style="color: #6f1d56; font-size: 17px; border-bottom: 2px solid #f0e6ed; padding-bottom: 8px;">Last-Minute Checklist</h2>
+    <ul style="padding-left: 20px; line-height: 2.2; font-size: 14px; color: #444;">
+      <li>✅ Test your <strong>camera and microphone</strong> now</li>
+      <li>✅ Find a <strong>quiet, well-lit location</strong></li>
+      <li>✅ Charge your device or plug it in</li>
+      <li>✅ Have your <strong>photo ID</strong> ready</li>
+      <li>✅ Join the call <strong>5 minutes early</strong></li>
+      <li>✅ Close unnecessary browser tabs and apps</li>
+    </ul>
+    <div style="background: #fefce8; border: 1px solid #fde047; border-radius: 8px; padding: 14px 18px; margin: 20px 0;">
+      <p style="margin: 0; font-size: 13px; color: #713f12;"><strong>💡 Tip:</strong> If you have any technical issues on the day, contact us immediately at <a href="mailto:compliance@vanquishtherapies.co.uk" style="color:#6f1d56;">compliance@vanquishtherapies.co.uk</a> before your scheduled time.</p>
+    </div>
+    <p style="font-size: 14px;">Good luck, {{first_name}} — we look forward to meeting you!</p>
+    <p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 20px;">The Compliance Team<br><span style="font-weight: normal; color: #777; font-size: 13px;">Vanquish Therapies</span></p>
+  </div>
+  <div style="background: #f5f5f5; padding: 16px 32px; border-radius: 0 0 12px 12px; border: 1px solid #e8e8e8; border-top: none; text-align: center;">
+    <p style="font-size: 11px; color: #aaa; margin: 0;">© Vanquish Therapies Ltd. All rights reserved.</p>
+  </div>
+</div>',
+                'placeholders' => ['first_name', 'scheduled_at', 'zoom_link', 'date', 'time', 'host_name']
+            ],
         ];
+
+        $qcCopies = [
+            'qc_stage_three_invite' => 'trainee_stage_three_invite',
+            'qc_interview_confirmed' => 'trainee_interview_confirmed',
+            'qc_interview_reminder' => 'trainee_interview_reminder',
+            'qc_placement_acceptance' => 'trainee_placement_acceptance',
+            'qc_onboarding_paperwork' => 'trainee_onboarding_paperwork',
+            'qc_placement_rejection' => 'trainee_placement_rejection',
+            'qc_induction_completed' => 'trainee_induction_completed',
+            'qc_interview_not_attended' => 'trainee_interview_not_attended',
+            'qc_induction_not_attended' => 'trainee_induction_not_attended',
+        ];
+
+        foreach ($qcCopies as $qcType => $traineeType) {
+            if (isset($defaults[$traineeType])) {
+                $defaults[$qcType] = $defaults[$traineeType];
+            }
+        }
+
+        return $defaults;
     }
 }
