@@ -93,9 +93,12 @@ class InductionController extends Controller
             $tc = TrainingCounsellor::find($tcId);
             if ($tc && $tc->email) {
                 $baseUrl = rtrim(config('app.frontend_url'), '/');
+                $start = $this->parseUkDateTime($induction->scheduled_at);
+                $end = $this->parseUkDateTime($induction->scheduled_end_at);
+
                 $inductionDateFormatted = $this->formatInductionDate($induction);
-                $startTime = Carbon::parse($induction->scheduled_at)->format('H:i');
-                $endTime = $induction->scheduled_end_at ? Carbon::parse($induction->scheduled_end_at)->format('H:i') : null;
+                $startTime = $start ? $start->format('H:i') : '';
+                $endTime = $end ? $end->format('H:i') : '';
 
                 app(\App\Services\EmailService::class)->sendAndLog(
                     $tc->email,
@@ -103,8 +106,10 @@ class InductionController extends Controller
                     [
                         'tc_name' => $tc->name,
                         'induction_date' => $inductionDateFormatted,
+                        'induction_start_time' => $startTime,
+                        'induction_end_time' => $endTime,
                         'start_time' => $startTime,
-                        'end_time' => $endTime ?? '',
+                        'end_time' => $endTime,
                         'location' => $induction->location ?? 'Online',
                         'notes' => $induction->notes ?? 'N/A',
                         'acceptance_url' => $baseUrl . '/induction/accept/' . $attendee->acceptance_token,
@@ -252,9 +257,12 @@ class InductionController extends Controller
                 $tc = TrainingCounsellor::find($tcId);
                 if ($tc && $tc->email) {
                     $baseUrl = rtrim(config('app.frontend_url'), '/');
+                    $start = $this->parseUkDateTime($induction->scheduled_at);
+                    $end = $this->parseUkDateTime($induction->scheduled_end_at);
+
                     $inductionDateFormatted = $this->formatInductionDate($induction);
-                    $startTime = Carbon::parse($induction->scheduled_at)->format('H:i');
-                    $endTime = $induction->scheduled_end_at ? Carbon::parse($induction->scheduled_end_at)->format('H:i') : null;
+                    $startTime = $start ? $start->format('H:i') : '';
+                    $endTime = $end ? $end->format('H:i') : '';
 
                     app(\App\Services\EmailService::class)->sendAndLog(
                         $tc->email,
@@ -262,8 +270,10 @@ class InductionController extends Controller
                         [
                             'tc_name' => $tc->name,
                             'induction_date' => $inductionDateFormatted,
+                            'induction_start_time' => $startTime,
+                            'induction_end_time' => $endTime,
                             'start_time' => $startTime,
-                            'end_time' => $endTime ?? '',
+                            'end_time' => $endTime,
                             'location' => $induction->location ?? 'Online',
                             'notes' => $induction->notes ?? 'N/A',
                             'acceptance_url' => $baseUrl . '/induction/accept/' . $attendee->acceptance_token,
@@ -283,21 +293,41 @@ class InductionController extends Controller
     }
 
     /**
-     * Format induction date and duration string for emails.
+     * Format induction date string for emails.
      */
     protected function formatInductionDate(Induction $induction): string
     {
-        $start = Carbon::parse($induction->scheduled_at);
-        $end = $induction->scheduled_end_at ? Carbon::parse($induction->scheduled_end_at) : null;
+        $start = $this->parseUkDateTime($induction->scheduled_at);
+        $end = $this->parseUkDateTime($induction->scheduled_end_at);
 
-        if ($end) {
-            if ($start->isSameDay($end)) {
-                return $start->format('l, jS F Y') . ' (' . $start->format('H:i') . ' - ' . $end->format('H:i') . ')';
-            } else {
-                return $start->format('l, jS F Y (H:i)') . ' - ' . $end->format('l, jS F Y (H:i)');
-            }
+        if (!$start) {
+            return '';
         }
 
-        return $start->format('l, jS F Y (H:i)');
+        if ($end && !$start->isSameDay($end)) {
+            return $start->format('l j F Y') . ' to ' . $end->format('l j F Y');
+        }
+
+        return $start->format('l j F Y');
+    }
+
+    /**
+     * Parse date/time string respecting Europe/London (UK) timezone.
+     */
+    protected function parseUkDateTime($datetime): ?Carbon
+    {
+        if (!$datetime) {
+            return null;
+        }
+
+        $string = trim((string) $datetime);
+        $parsed = Carbon::parse($string);
+
+        // If no explicit timezone offset or Z was present in the string, assume Europe/London local input
+        if (!preg_match('/(Z|[+-]\d{2}:?\d{2})$/', $string)) {
+            return Carbon::parse($string, 'Europe/London');
+        }
+
+        return $parsed->setTimezone('Europe/London');
     }
 }

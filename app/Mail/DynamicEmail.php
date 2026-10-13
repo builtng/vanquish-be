@@ -322,8 +322,8 @@ class DynamicEmail extends Mailable
 
             'induction_invitation' => [
                 'subject' => 'Induction Session Invitation',
-                'body' => '<h1>Induction Invitation</h1><p>Hi {{tc_name}},</p><p>You have been invited to an induction session on {{induction_date}}.</p><p><strong>Location:</strong> {{location}}</p><p><strong>Notes:</strong> {{notes}}</p><p><a href="{{acceptance_url}}" style="padding:10px 20px;background-color:green;color:white;text-decoration:none;border-radius:5px;">Accept Invitation</a> <a href="{{decline_url}}" style="padding:10px 20px;background-color:red;color:white;text-decoration:none;border-radius:5px;">Decline</a></p><p>Warm regards,<br>The Vanquish Therapies Team</p>',
-                'placeholders' => ['tc_name', 'induction_date', 'start_time', 'end_time', 'location', 'notes', 'acceptance_url', 'decline_url']
+                'body' => '<h1>Induction Invitation</h1><p>Hi {{tc_name}},</p><p>You have been invited to an induction session on {{induction_date}}, {{induction_start_time}} to {{induction_end_time}} (UK time).</p><p><strong>Location:</strong> {{location}}</p><p><strong>Notes:</strong> {{notes}}</p><p><a href="{{acceptance_url}}" style="padding:10px 20px;background-color:green;color:white;text-decoration:none;border-radius:5px;">Accept Invitation</a> <a href="{{decline_url}}" style="padding:10px 20px;background-color:red;color:white;text-decoration:none;border-radius:5px;">Decline</a></p><p>Warm regards,<br>The Vanquish Therapies Team</p>',
+                'placeholders' => ['tc_name', 'induction_date', 'induction_start_time', 'induction_end_time', 'start_time', 'end_time', 'location', 'notes', 'acceptance_url', 'decline_url']
             ],
             'qualified_form' => [
                 'subject' => 'Action Required: Qualified Practitioner Form',
