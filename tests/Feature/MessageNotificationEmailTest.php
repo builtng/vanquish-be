@@ -269,6 +269,7 @@ class MessageNotificationEmailTest extends TestCase
 
         $response->assertStatus(201);
 
+        Mail::assertSent(DynamicEmail::class, 1);
         Mail::assertSent(DynamicEmail::class, function ($mail) use ($recipientStaff) {
             $envelope = $mail->envelope();
             $html = $mail->render();
@@ -279,5 +280,82 @@ class MessageNotificationEmailTest extends TestCase
                 && str_contains($html, 'Liam Staff')
                 && str_contains($html, 'Log in to read your message');
         });
+
+        // Send 2nd message immediately (within 15 minutes) - should not send duplicate email
+        $response2 = $this->actingAs($senderStaff, 'sanctum')->postJson('/api/messages/send-to-staff', [
+            'to_user_ids' => [$recipientStaff->id],
+            'subject' => 'Quick Follow-up Note',
+            'message' => 'Another note within 2 minutes.',
+        ]);
+        $response2->assertStatus(201);
+
+        // Send 3rd message 4 minutes later
+        Carbon::setTestNow(now()->addMinutes(4));
+        $response3 = $this->actingAs($senderStaff, 'sanctum')->postJson('/api/messages/send-to-staff', [
+            'to_user_ids' => [$recipientStaff->id],
+            'subject' => 'Third Note',
+            'message' => 'Third note within window.',
+        ]);
+        $response3->assertStatus(201);
+
+        // Verify still exactly 1 email sent in total (no flood)
+        Mail::assertSent(DynamicEmail::class, 1);
+    }
+
+    public function test_counsellor_send_to_individual_staff_triggers_privacy_email_and_throttles(): void
+    {
+        Mail::fake();
+
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'name' => 'Support Coordinator',
+            'email' => 'support@vanquish.test',
+        ]);
+
+        $tc = TrainingCounsellor::create([
+            'uuid' => 'tc-uuid-direct',
+            'tc_id' => 'TC-1003',
+            'name' => 'Jordan Counsellor',
+            'email' => 'jordan@counsellor.test',
+        ]);
+
+        $counsellorUser = User::factory()->create([
+            'role' => 'counsellor',
+            'email' => 'jordan@counsellor.test',
+            'training_counsellor_id' => $tc->id,
+            'name' => 'Jordan Counsellor',
+        ]);
+
+        // Message 1: Counsellor to specific staff member
+        $response1 = $this->actingAs($counsellorUser, 'sanctum')->postJson('/api/messages/send-to-staff', [
+            'to_user_ids' => [$staff->id],
+            'subject' => 'Question about client allocation',
+            'message' => 'Confidential client inquiry.',
+        ]);
+        $response1->assertStatus(201);
+
+        Mail::assertSent(DynamicEmail::class, 1);
+        Mail::assertSent(DynamicEmail::class, function ($mail) use ($staff) {
+            $envelope = $mail->envelope();
+            $html = $mail->render();
+
+            return $mail->hasTo($staff->email)
+                && $envelope->subject === 'You have a new message'
+                && !str_contains($html, 'Confidential client inquiry.')
+                && str_contains($html, 'Support Coordinator')
+                && str_contains($html, 'Log in to read your message');
+        });
+
+        // Message 2: 3 minutes later
+        Carbon::setTestNow(now()->addMinutes(3));
+        $response2 = $this->actingAs($counsellorUser, 'sanctum')->postJson('/api/messages/send-to-staff', [
+            'to_user_ids' => [$staff->id],
+            'subject' => 'Follow up on allocation',
+            'message' => 'Additional confidential client inquiry.',
+        ]);
+        $response2->assertStatus(201);
+
+        // Total remains 1 email (no inbox flood)
+        Mail::assertSent(DynamicEmail::class, 1);
     }
 }
