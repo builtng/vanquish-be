@@ -114,7 +114,8 @@ class MidRangeIntakeController extends Controller
                 'match_score' => $result['score'],
                 'match_breakdown' => $result['breakdown'],
                 'fit_label' => $this->fitLabel($result['score']),
-                'show_own_consultation_availability' => $tc->show_own_consultation_availability,
+                'show_own_consultation_availability' => (bool) $tc->show_own_consultation_availability,
+                'show_vanquish_consultation_availability' => (bool) $tc->show_vanquish_consultation_availability,
                 'specialty' => $this->buildSpecialty($tc),
             ];
         })
@@ -130,10 +131,12 @@ class MidRangeIntakeController extends Controller
     /**
      * GET /mid-range-intake/consultation-availability/{tcUuid}
      *
-     * Priority logic: if the counsellor has opted to show their own
-     * consultation availability and has open slots, return those. Otherwise
-     * signal the frontend to fall back to the existing generic
-     * `GET /consultation-slots/available` (Vanquish Therapies pool).
+     * Priority logic:
+     * 1. Toggle 1 on (show_own_consultation_availability) and own slots exist: return own slots.
+     * 2. Otherwise, toggle 2 on (show_vanquish_consultation_availability): return Vanquish slots,
+     *    and the booking records this counsellor as the chosen counsellor.
+     * 3. Both off (or own slots empty and toggle 2 off): no slots,
+     *    message: "This counsellor is not taking new consultations at the moment."
      */
     public function consultationAvailability(Request $request, string $tcUuid)
     {
@@ -143,7 +146,10 @@ class MidRangeIntakeController extends Controller
             return response()->json(['message' => 'Counsellor not found'], 404);
         }
 
-        if ($tc->show_own_consultation_availability) {
+        $showOwn = (bool) $tc->show_own_consultation_availability;
+        $showVanquish = (bool) $tc->show_vanquish_consultation_availability;
+
+        if ($showOwn) {
             $slots = $this->generateOwnConsultationSlots($tc);
 
             if (!empty($slots)) {
@@ -156,11 +162,21 @@ class MidRangeIntakeController extends Controller
             }
         }
 
+        if ($showVanquish) {
+            return response()->json([
+                'source' => 'vanquish',
+                'tc_uuid' => $tc->uuid,
+                'tc_name' => $tc->name,
+                'slots' => [],
+            ]);
+        }
+
         return response()->json([
-            'source' => 'vanquish',
+            'source' => 'none',
             'tc_uuid' => $tc->uuid,
             'tc_name' => $tc->name,
             'slots' => [],
+            'message' => 'This counsellor is not taking new consultations at the moment.',
         ]);
     }
 

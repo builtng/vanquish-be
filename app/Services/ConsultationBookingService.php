@@ -50,6 +50,7 @@ class ConsultationBookingService
                     'consultation_id' => Consultation::generateNextConsultationId(),
                     'client_id' => $client->id,
                     'consultation_slot_id' => $slot->id,
+                    'tc_id' => $client->preferred_tc_id,
                     'scheduled_at' => $slot->consultation_datetime,
                     'status' => 'scheduled',
                     'payment_status' => 'paid',
@@ -61,12 +62,17 @@ class ConsultationBookingService
                     return;
                 }
 
-                $target->update([
+                $updates = [
                     'consultation_slot_id' => $slot->id,
                     'scheduled_at' => $slot->consultation_datetime,
                     'status' => 'scheduled',
                     'payment_status' => 'paid',
-                ]);
+                ];
+                if (!$target->tc_id && $client->preferred_tc_id) {
+                    $updates['tc_id'] = $client->preferred_tc_id;
+                }
+
+                $target->update($updates);
             }
 
             $client->update(['stage' => 'Consultation Booked']);

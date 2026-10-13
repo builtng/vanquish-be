@@ -191,7 +191,9 @@ class IntakeFormController extends Controller
 
             $preferredTc = !empty($validated['preferred_tc_uuid'])
                 ? TrainingCounsellor::where('uuid', $validated['preferred_tc_uuid'])->first()
-                : null;
+                : (!empty($validated['consultation_with_tc_uuid'])
+                    ? TrainingCounsellor::where('uuid', $validated['consultation_with_tc_uuid'])->first()
+                    : null);
 
             $clientId = null;
             $client = null;
@@ -309,6 +311,13 @@ class IntakeFormController extends Controller
                         );
                     }
                 } elseif (!empty($validated['consultation_slot_id'])) {
+                    if (!empty($validated['consultation_with_tc_uuid'])) {
+                        $consultationTc = TrainingCounsellor::where('uuid', $validated['consultation_with_tc_uuid'])->first();
+                        if ($consultationTc) {
+                            $client->update(['preferred_tc_id' => $consultationTc->id]);
+                            $consultation?->update(['tc_id' => $consultationTc->id]);
+                        }
+                    }
                     $this->bookingService->finalize($client, (int) $validated['consultation_slot_id'], $consultation);
                 }
             } elseif ($client) {
@@ -327,11 +336,15 @@ class IntakeFormController extends Controller
                     ? TrainingCounsellor::where('uuid', $validated['consultation_with_tc_uuid'])->first()
                     : null;
 
+                if ($consultationTc) {
+                    $client->update(['preferred_tc_id' => $consultationTc->id]);
+                }
+
                 \App\Models\Consultation::create([
                     'consultation_id' => \App\Models\Consultation::generateNextConsultationId(),
                     'client_id' => $client->id,
                     'consultation_slot_id' => $validated['consultation_slot_id'] ?? null,
-                    'tc_id' => $consultationTc?->id,
+                    'tc_id' => $consultationTc?->id ?? $client?->preferred_tc_id,
                     'scheduled_at' => $scheduledAt,
                     'payment_status' => 'pending',
                     'payment_amount' => $validated['consultation_fee'] ?? 15,

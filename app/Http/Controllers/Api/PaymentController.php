@@ -364,6 +364,16 @@ class PaymentController extends Controller
                             $slotId = $intake->consultation_slot_id ?? null;
                         }
 
+                        if (!empty($validated['consultation_with_tc_uuid'])) {
+                            $consultationTc = TrainingCounsellor::where('uuid', $validated['consultation_with_tc_uuid'])->first();
+                            if ($consultationTc) {
+                                $client->update(['preferred_tc_id' => $consultationTc->id]);
+                                if (isset($consultation)) {
+                                    $consultation->update(['tc_id' => $consultationTc->id]);
+                                }
+                            }
+                        }
+
                         if ($slotId && isset($consultation)) {
                             // One automatic email: booking confirmed with the
                             // chosen date/time and Zoom details.
