@@ -195,9 +195,20 @@ class AuthController extends Controller
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $user->id,
+            'bio' => 'sometimes|nullable|string|max:1200',
         ]);
 
-        $user->update($validated);
+        $user->update([
+            'name' => $validated['name'] ?? $user->name,
+            'email' => $validated['email'] ?? $user->email,
+        ]);
+
+        if ($request->has('bio') && $user->training_counsellor_id) {
+            $tc = \App\Models\TrainingCounsellor::find($user->training_counsellor_id);
+            if ($tc && $tc->counsellor_type === 'Qualified') {
+                $tc->update(['bio' => $validated['bio'] ?? null]);
+            }
+        }
 
         return response()->json([
             'message' => 'Profile updated successfully.',

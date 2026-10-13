@@ -551,6 +551,39 @@ class TrainingCounsellorController extends Controller
     }
 
     /**
+     * Self-service bio update (Qualified counsellors only).
+     * Saves plain text bio (maximum 1,200 characters) to the training_counsellors.bio field.
+     */
+    public function updateBio(Request $request)
+    {
+        $user = $request->user();
+
+        if (!$user || $user->role !== 'counsellor' || !$user->training_counsellor_id) {
+            return response()->json(['message' => 'Unauthorized. Counsellor access required.'], 403);
+        }
+
+        $tc = TrainingCounsellor::findOrFail($user->training_counsellor_id);
+
+        if ($tc->counsellor_type !== 'Qualified') {
+            return response()->json(['message' => 'Only qualified counsellors can set a public bio.'], 403);
+        }
+
+        $validated = $request->validate([
+            'bio' => 'nullable|string|max:1200',
+        ]);
+
+        $tc->update([
+            'bio' => $validated['bio'] ?? null,
+        ]);
+
+        return response()->json([
+            'message' => 'Bio updated successfully.',
+            'tc'      => $tc->fresh(),
+            'bio'     => $tc->fresh()->bio,
+        ]);
+    }
+
+    /**
      * Return a counsellor's clients and their upcoming session dates,
      * for admin review (e.g. before approving a time-off request).
      */

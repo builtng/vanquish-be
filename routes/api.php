@@ -194,6 +194,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/counsellor/my-data', [TrainingCounsellorController::class, 'getOwnData']);
         Route::post('/counsellor/upload-photo', [TrainingCounsellorController::class, 'uploadOwnPhoto']);
         Route::put('/counsellor/consultation-availability-toggles', [TrainingCounsellorController::class, 'updateConsultationDelegationPreferences']);
+        Route::put('/counsellor/bio', [TrainingCounsellorController::class, 'updateBio']);
         Route::delete('/counsellor/delete-photo', [TrainingCounsellorController::class, 'deleteOwnPhoto']);
         Route::get('/counsellor/psg-sessions', [PsgSessionController::class, 'mySessions']);
         Route::get('/counsellor/holidays', [TrainingCounsellorHolidayController::class, 'myHolidays']);
