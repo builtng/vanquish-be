@@ -19,7 +19,7 @@ class ServiceController extends Controller
             $defaultMessage = "This service is at capacity at this time. If you would like to work with us, you can click here to proceed with our Partner service Vanquish Therapies Coaching & Therapy";
             
             if ($useInternalIntake) {
-                $defaultUrl = rtrim(config('app.frontend_url'), '/') . "/clform";
+                $defaultUrl = rtrim(config('app.frontend_url'), '/') . "/low-cost-intake";
             } else {
                 $defaultUrl = $companySettings['jotform_intake_form_url'] ?? "https://pci.jotform.com/form/243161740962456";
             }
