@@ -37,7 +37,7 @@ class MatchScoringService
         $categories = [
             ['label' => 'Availability Match', 'weight' => $weights['availability'], 'score' => $this->scoreAvailability($clientData, $tc)],
             ['label' => 'Areas of Support Match', 'weight' => self::AREAS_OF_SUPPORT_WEIGHT, 'score' => $this->scoreAreasOfSupport($clientData, $tc)],
-            ['label' => 'Modality Match', 'weight' => $weights['modality'], 'score' => 100],
+            ['label' => 'Modality Match', 'weight' => $weights['modality'], 'score' => $this->scoreModality($clientData, $tc)],
             ['label' => 'Specialty Match', 'weight' => self::SPECIALTY_WEIGHT, 'score' => $this->scoreSpecialty($clientData, $tc)],
             ['label' => 'Gender Preference', 'weight' => $weights['gender'], 'score' => $this->scorePreference($clientData['gender_preference'] ?? null, $tc->gender)],
             ['label' => 'Ethnicity Preference', 'weight' => $weights['ethnicity'], 'score' => $this->scorePreference($clientData['ethnicity_preference'] ?? null, $tc->ethnicity)],
@@ -199,5 +199,31 @@ class MatchScoringService
         }
 
         return 100;
+    }
+
+    private function scoreModality(array $clientData, TrainingCounsellor $tc): int
+    {
+        $pref = $clientData['modality_preference'] ?? $clientData['modality'] ?? null;
+        if (empty($pref) || in_array(strtolower(trim($pref)), ['unsure', 'no preference', 'any', 'all'])) {
+            return 100;
+        }
+
+        $tcModality = (string) ($tc->modality ?? '');
+        if (empty($tcModality)) {
+            return 0;
+        }
+
+        $needle = strtolower(trim($pref));
+        $haystack = strtolower($tcModality);
+
+        if (str_contains($haystack, $needle)) {
+            return 100;
+        }
+
+        if (($needle === 'integrative therapy' || $needle === 'integrative') && str_contains($haystack, 'integrative')) {
+            return 100;
+        }
+
+        return 0;
     }
 }

@@ -61,6 +61,7 @@ class IntakeFormController extends Controller
                 'age_preference' => 'nullable|string|max:255',
                 'ethnicity_preference' => 'nullable|string|max:255',
                 'orientation_preference' => 'nullable|string|max:255',
+                'modality_preference' => 'nullable|string|max:255',
                 'hear_about_us' => 'nullable|string|max:255',
                 'referral_reason' => 'nullable|string',
                 'whatsapp_agreement' => 'nullable|string',

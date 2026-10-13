@@ -136,4 +136,124 @@ class MidRangeFilteredCounsellorsTest extends TestCase
             }
         }
     }
+
+    public function test_Q18_modality_filters(): void
+    {
+        $tc1 = TrainingCounsellor::create([
+            'tc_id' => 'QC-M01',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Alice Person-Centred',
+            'email' => 'alice@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Person-Centred',
+        ]);
+
+        $tc2 = TrainingCounsellor::create([
+            'tc_id' => 'QC-M02',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Bob Psychodynamic',
+            'email' => 'bob@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Psychodynamic Therapy',
+        ]);
+
+        $tc3 = TrainingCounsellor::create([
+            'tc_id' => 'QC-M03',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Charlie Integrative CBT',
+            'email' => 'charlie@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Integrative Therapy, CBT',
+        ]);
+
+        // Filter by Person-Centred
+        $res1 = $this->postJson('/api/mid-range-intake/filtered-counsellors', [
+            'service_type' => 'Mid Range',
+            'modality_preference' => 'Person-Centred',
+        ]);
+
+        $res1->assertStatus(200);
+        $uuids1 = collect($res1->json('counsellors'))->pluck('uuid');
+        $this->assertTrue($uuids1->contains($tc1->uuid));
+        $this->assertFalse($uuids1->contains($tc2->uuid));
+        $this->assertFalse($uuids1->contains($tc3->uuid));
+
+        // Filter by CBT (matches in comma-separated list of TC3)
+        $res2 = $this->postJson('/api/mid-range-intake/filtered-counsellors', [
+            'service_type' => 'Mid Range',
+            'modality_preference' => 'CBT',
+        ]);
+
+        $res2->assertStatus(200);
+        $uuids2 = collect($res2->json('counsellors'))->pluck('uuid');
+        $this->assertTrue($uuids2->contains($tc3->uuid));
+        $this->assertFalse($uuids2->contains($tc1->uuid));
+        $this->assertFalse($uuids2->contains($tc2->uuid));
+    }
+
+    public function test_Q18_unsure_shows_all(): void
+    {
+        $tc1 = TrainingCounsellor::create([
+            'tc_id' => 'QC-U01',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Alice Person-Centred',
+            'email' => 'alice.u@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Person-Centred',
+        ]);
+
+        $tc2 = TrainingCounsellor::create([
+            'tc_id' => 'QC-U02',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Bob Psychodynamic',
+            'email' => 'bob.u@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Psychodynamic Therapy',
+        ]);
+
+        $tc3 = TrainingCounsellor::create([
+            'tc_id' => 'QC-U03',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Charlie Integrative',
+            'email' => 'charlie.u@example.com',
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'offers_mid_range' => true,
+            'modality' => 'Integrative Therapy',
+        ]);
+
+        $res = $this->postJson('/api/mid-range-intake/filtered-counsellors', [
+            'service_type' => 'Mid Range',
+            'modality_preference' => 'Unsure',
+        ]);
+
+        $res->assertStatus(200);
+        $counsellors = $res->json('counsellors');
+        $this->assertCount(3, $counsellors);
+
+        $uuids = collect($counsellors)->pluck('uuid');
+        $this->assertTrue($uuids->contains($tc1->uuid));
+        $this->assertTrue($uuids->contains($tc2->uuid));
+        $this->assertTrue($uuids->contains($tc3->uuid));
+
+        // Check each counsellor's modalities are returned so they can be shown on their card
+        $c1 = collect($counsellors)->firstWhere('uuid', $tc1->uuid);
+        $this->assertEquals('Person-Centred', $c1['modality']);
+
+        $c2 = collect($counsellors)->firstWhere('uuid', $tc2->uuid);
+        $this->assertEquals('Psychodynamic Therapy', $c2['modality']);
+
+        $c3 = collect($counsellors)->firstWhere('uuid', $tc3->uuid);
+        $this->assertEquals('Integrative Therapy', $c3['modality']);
+    }
 }

@@ -42,10 +42,14 @@ class MidRangeIntakeController extends Controller
             'age_preference' => 'nullable|string|max:255',
             'ethnicity_preference' => 'nullable|string|max:255',
             'orientation_preference' => 'nullable|string|max:255',
+            'modality_preference' => 'nullable|string|max:255',
+            'modality' => 'nullable|string|max:255',
         ]);
 
         $tierColumn = $validated['service_type'] === 'Mid Range' ? 'offers_mid_range' : 'offers_coaching';
         $isCouples = $validated['is_couples'] ?? false;
+        $modalityPref = $validated['modality_preference'] ?? $validated['modality'] ?? null;
+        $isModalityChosen = !empty($modalityPref) && !in_array(strtolower(trim($modalityPref)), ['unsure', 'no preference', 'any', 'all']);
 
         $query = TrainingCounsellor::where('counsellor_type', 'Qualified')
             ->where('status', 'Active')
@@ -58,6 +62,16 @@ class MidRangeIntakeController extends Controller
             });
         }
 
+        if ($isModalityChosen) {
+            $needle = trim($modalityPref);
+            $query->where(function ($q) use ($needle) {
+                $q->where('modality', 'like', '%' . $needle . '%');
+                if (strcasecmp($needle, 'Integrative Therapy') === 0 || strcasecmp($needle, 'Integrative') === 0) {
+                    $q->orWhere('modality', 'like', '%Integrative%');
+                }
+            });
+        }
+
         $counsellors = $query->get();
 
         // Fallback level 1: relax the couples/family JSON constraint
@@ -67,6 +81,17 @@ class MidRangeIntakeController extends Controller
             $fallbackQuery = TrainingCounsellor::where('counsellor_type', 'Qualified')
                 ->where('status', 'Active')
                 ->where($tierColumn, true);
+
+            if ($isModalityChosen) {
+                $needle = trim($modalityPref);
+                $fallbackQuery->where(function ($q) use ($needle) {
+                    $q->where('modality', 'like', '%' . $needle . '%');
+                    if (strcasecmp($needle, 'Integrative Therapy') === 0 || strcasecmp($needle, 'Integrative') === 0) {
+                        $q->orWhere('modality', 'like', '%Integrative%');
+                    }
+                });
+            }
+
             $counsellors = $fallbackQuery->get();
         }
 
