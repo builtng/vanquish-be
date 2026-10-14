@@ -113,7 +113,7 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/trainee-interview/book', [TraineeApplicationController::class, 'bookInterview']);
     Route::post('/qualified-counsellor/submit', [TrainingCounsellorController::class, 'submitQualifiedForm']);
     Route::post('/submit-qualified-form', [TrainingCounsellorController::class, 'submitQualifiedForm']);
-    Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument']);
+    Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument'])->middleware('throttle:60,1');
     Route::get('/qualified-counsellor/prefill/{uuid}', [TrainingCounsellorController::class, 'publicPrefill']);
 });
 

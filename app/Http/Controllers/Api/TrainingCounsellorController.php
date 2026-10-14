@@ -17,6 +17,8 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Services\CompanySettingsService;
 
@@ -940,6 +942,21 @@ class TrainingCounsellorController extends Controller
 
     public function submitQualifiedForm(Request $request)
     {
+        $validateQcDocToken = function ($attribute, $value, $fail) {
+            if (empty($value)) return;
+            if (is_string($value)) {
+                if (filter_var($value, FILTER_VALIDATE_URL) || str_contains($value, '/') || str_contains($value, '\\') || str_contains($value, 'storage') || !preg_match('/^[a-zA-Z0-9]{32,64}$/', $value)) {
+                    $fail("The {$attribute} must be a valid one-time upload token. External URLs and raw file paths are not allowed.");
+                    return;
+                }
+                $stored = Cache::get("qc_upload_token:{$value}");
+                if (!$stored) {
+                    $fail("The upload token for {$attribute} is invalid or has expired. Please re-upload the document.");
+                    return;
+                }
+            }
+        };
+
         $validated = $request->validate([
             'tc_id' => 'nullable', // Optional: if provided, updates existing TC/QC. If null, creates new QC.
             'email' => 'required_without:tc_id|nullable|email|max:255',
@@ -957,12 +974,12 @@ class TrainingCounsellorController extends Controller
             'qualified_to_work_with' => 'nullable|array',
             'qualified_to_work_with.*' => 'string',
             'challenging_cases' => 'nullable|string',
-            'qualification_document' => 'nullable|string',
-            'dbs_certificate_qualified' => 'nullable|string',
-            'insurance_qualified' => 'nullable|string',
-            'self_employment_proof' => 'nullable|string',
-            'professional_membership' => 'nullable|string',
-            'valid_id_document' => 'nullable|string',
+            'qualification_document' => ['nullable', $validateQcDocToken],
+            'dbs_certificate_qualified' => ['nullable', $validateQcDocToken],
+            'insurance_qualified' => ['nullable', $validateQcDocToken],
+            'self_employment_proof' => ['nullable', $validateQcDocToken],
+            'professional_membership' => ['nullable', $validateQcDocToken],
+            'valid_id_document' => ['nullable', $validateQcDocToken],
             'signature' => 'required|string',
             'signature_date' => 'required|string',
             'availability' => 'nullable|array',
@@ -1016,6 +1033,30 @@ class TrainingCounsellorController extends Controller
         // 1. Always find or create a permanent Person identity record
         $person = Person::findOrCreateByEmail($normalizedEmail, $fullName, $validated['phone'] ?? null);
 
+        // Resolve document tokens to stored private paths
+        $docKeys = [
+            'qualification_document',
+            'dbs_certificate_qualified',
+            'insurance_qualified',
+            'self_employment_proof',
+            'professional_membership',
+            'valid_id_document',
+        ];
+
+        $tokensToForget = [];
+        $resolvedDocs = [];
+
+        foreach ($docKeys as $docKey) {
+            if (!empty($validated[$docKey]) && is_string($validated[$docKey])) {
+                $token = $validated[$docKey];
+                $storedPath = Cache::get("qc_upload_token:{$token}");
+                if ($storedPath) {
+                    $resolvedDocs[$docKey] = $storedPath;
+                    $tokensToForget[] = $token;
+                }
+            }
+        }
+
         // 2. Always record each submission as its OWN separate, immutable QcApplication record
         // The QC form only creates a qc_applications row linked to the person.
         // It NEVER updates or restores a training_counsellors row.
@@ -1040,17 +1081,22 @@ class TrainingCounsellorController extends Controller
             'counsellor_training_details' => $validated['counsellor_training_details'] ?? null,
             'qualified_to_work_with' => $validated['qualified_to_work_with'] ?? [],
             'challenging_cases' => $validated['challenging_cases'] ?? null,
-            'qualification_document' => $validated['qualification_document'] ?? null,
-            'dbs_certificate_qualified' => $validated['dbs_certificate_qualified'] ?? null,
-            'insurance_qualified' => $validated['insurance_qualified'] ?? null,
-            'self_employment_proof' => $validated['self_employment_proof'] ?? null,
-            'professional_membership' => $validated['professional_membership'] ?? null,
-            'valid_id_document' => $validated['valid_id_document'] ?? null,
+            'qualification_document' => $resolvedDocs['qualification_document'] ?? null,
+            'dbs_certificate_qualified' => $resolvedDocs['dbs_certificate_qualified'] ?? null,
+            'insurance_qualified' => $resolvedDocs['insurance_qualified'] ?? null,
+            'self_employment_proof' => $resolvedDocs['self_employment_proof'] ?? null,
+            'professional_membership' => $resolvedDocs['professional_membership'] ?? null,
+            'valid_id_document' => $resolvedDocs['valid_id_document'] ?? null,
             'signature' => $validated['signature'],
             'signature_date' => $validated['signature_date'],
             'status' => 'New Application',
             'answers' => $validated,
         ]);
+
+        // Invalidate single-use upload tokens immediately after successful creation
+        foreach ($tokensToForget as $tokenToForget) {
+            Cache::forget("qc_upload_token:{$tokenToForget}");
+        }
 
         ActivityLog::create([
             'user_id' => $request->user()->id ?? null,
@@ -1100,12 +1146,15 @@ class TrainingCounsellorController extends Controller
         $request->validate([
             'file' => 'required|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
             'field' => 'required|string|max:100',
-            'tc_id' => 'nullable',
+        ], [
+            'file.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'file.mimes' => 'Invalid file type. Allowed types: PDF, DOC, DOCX, JPG, JPEG, PNG',
+            'file.required' => 'Please select a file to upload.',
         ]);
 
         $file = $request->file('file');
-        $field = $request->input('field');
-        $tcIdParam = $request->input('tc_id');
+        $field = preg_replace('/[^a-zA-Z0-9_-]/', '_', $request->input('field'));
+        $field = substr($field, 0, 100);
 
         // Additional security checks
         $originalName = $file->getClientOriginalName();
@@ -1134,72 +1183,27 @@ class TrainingCounsellorController extends Controller
             ], 422);
         }
 
-        // Sanitize field name to prevent directory traversal
-        $field = preg_replace('/[^a-zA-Z0-9_-]/', '_', $field);
-        $field = substr($field, 0, 100);
-
         // Sanitize filename
         $sanitizedName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName);
         $sanitizedName = substr($sanitizedName, 0, 255);
         $filename = time() . '_' . uniqid() . '_' . $sanitizedName;
 
-        // Check if an application is targeted
-        $qcAppId = $request->input('qc_application_id') ?? $request->input('application_id');
-        $qcApp = null;
-        if (!empty($qcAppId)) {
-            $qcApp = is_numeric($qcAppId)
-                ? QcApplication::find($qcAppId)
-                : QcApplication::where('uuid', $qcAppId)->first();
-        }
+        // Store file strictly on private disk under qualified_counsellors/documents/{field}
+        $path = $file->storeAs("qualified_counsellors/documents/{$field}", $filename, 'private');
 
-        if (!$qcApp && !empty($tcIdParam)) {
-            // Check if tcIdParam is actually an application ID or UUID
-            $qcApp = is_numeric($tcIdParam)
-                ? QcApplication::find($tcIdParam)
-                : QcApplication::where('uuid', $tcIdParam)->first();
-        }
-
-        if ($qcApp) {
-            $path = $file->storeAs("qualified_counsellors/applications/{$qcApp->id}/{$field}", $filename, 'private');
-            $docFields = [
-                'qualification' => 'qualification_document',
-                'qualification_document' => 'qualification_document',
-                'dbs' => 'dbs_certificate_qualified',
-                'dbs_certificate_qualified' => 'dbs_certificate_qualified',
-                'valid_id' => 'valid_id_document',
-                'valid_id_document' => 'valid_id_document',
-                'membership' => 'professional_membership',
-                'professional_membership' => 'professional_membership',
-                'self_employment' => 'self_employment_proof',
-                'self_employment_proof' => 'self_employment_proof',
-                'insurance' => 'insurance_qualified',
-                'insurance_qualified' => 'insurance_qualified',
-            ];
-            if (isset($docFields[$field])) {
-                $qcApp->update([$docFields[$field] => $path]);
-            }
-        } elseif (!empty($tcIdParam)) {
-            // Find TC or QC by ID, tc_id, or uuid
-            $tc = is_numeric($tcIdParam)
-                ? TrainingCounsellor::find($tcIdParam)
-                : null;
-
-            if (!$tc) {
-                $tc = TrainingCounsellor::where('tc_id', $tcIdParam)
-                    ->orWhere('uuid', $tcIdParam)
-                    ->orWhere('id', $tcIdParam)
-                    ->first();
-            }
-
-            $tcFolder = $tc ? $tc->id : 'uploads';
-            $path = $file->storeAs("qualified_counsellors/{$tcFolder}/{$field}", $filename, 'private');
-        } else {
-            $path = $file->storeAs("qualified_counsellors/onboarding/{$field}", $filename, 'private');
-        }
+        // One-time 40-character upload token stored in cache for 24 hours
+        $uploadToken = Str::random(40);
+        Cache::put("qc_upload_token:{$uploadToken}", $path, now()->addHours(24));
 
         return response()->json([
-            'file_path' => $path,
+            'success' => true,
+            'message' => 'Document uploaded successfully',
+            'upload_token' => $uploadToken,
+            'token' => $uploadToken,
+            'file_path' => $uploadToken,
+            'url' => $uploadToken,
             'file_name' => $originalName,
+            'original_name' => $originalName,
         ]);
     }
 

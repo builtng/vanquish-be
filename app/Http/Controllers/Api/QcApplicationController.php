@@ -637,7 +637,19 @@ class QcApplicationController extends Controller
 
         // External CDN URL (e.g., JotForm CDN) that does not contain /storage/
         if (filter_var($path, FILTER_VALIDATE_URL) && !str_contains($path, '/storage/')) {
-            return redirect($path);
+            $parsedHost = parse_url($path, PHP_URL_HOST);
+            $trustedDomains = ['jotform.com', 'jotformeu.com', 'jotformpro.com', 'files.jotform.com'];
+            $isTrusted = false;
+            foreach ($trustedDomains as $domain) {
+                if ($parsedHost === $domain || ($parsedHost && str_ends_with($parsedHost, '.' . $domain))) {
+                    $isTrusted = true;
+                    break;
+                }
+            }
+            if ($isTrusted) {
+                return redirect($path);
+            }
+            return response()->json(['message' => 'Untrusted external document URL'], 403);
         }
 
         if (filter_var($path, FILTER_VALIDATE_URL)) {
