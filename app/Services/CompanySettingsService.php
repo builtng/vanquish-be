@@ -26,6 +26,11 @@ class CompanySettingsService
             }
         }
 
+        // Default use_internal_psg_form to '1' (built-in PSG form on when not set)
+        if (!array_key_exists('use_internal_psg_form', $map) || $map['use_internal_psg_form'] === null || $map['use_internal_psg_form'] === '') {
+            $map['use_internal_psg_form'] = '1';
+        }
+
         return $map;
     }
 
