@@ -36,6 +36,8 @@ class CompanySettingsController extends Controller
             'use_internal_session_notes', 'use_internal_psg_form',
             'use_internal_agreement_form', 'use_internal_intake_form',
             'use_internal_trainee_application',
+            'feedback_form_enabled', 'feedback_form_session_number',
+            'feedback_form_url',
         ];
 
         $data = $request->validate([
@@ -62,6 +64,9 @@ class CompanySettingsController extends Controller
             'use_internal_agreement_form' => 'sometimes|string|in:0,1',
             'use_internal_intake_form'   => 'sometimes|string|in:0,1',
             'use_internal_trainee_application' => 'sometimes|string|in:0,1',
+            'feedback_form_enabled'      => 'sometimes|string|in:0,1',
+            'feedback_form_session_number' => 'sometimes|integer|min:1|max:100',
+            'feedback_form_url'          => 'sometimes|nullable|string|max:500',
         ]);
 
         foreach ($data as $key => $value) {

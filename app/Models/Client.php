@@ -77,6 +77,8 @@ class Client extends Model
         'case_study_consent',
         'last_feedback_sent_at',
         'last_feedback_date',
+        'last_feedback_milestone',
+        'feedback_milestones_sent',
         'satisfaction_score',
         'feedback_count',
         'allocated_day',
@@ -130,6 +132,8 @@ class Client extends Model
         'agreement_signed_at' => 'datetime',
         'last_feedback_sent_at' => 'date',
         'last_feedback_date' => 'date',
+        'last_feedback_milestone' => 'integer',
+        'feedback_milestones_sent' => 'array',
         'satisfaction_score' => 'decimal:2',
         'next_booking_deadline' => 'date',
         'jotform_intake_data' => 'array',
@@ -139,6 +143,17 @@ class Client extends Model
         'partner_on_medication' => 'boolean',
         'archived_at' => 'datetime',
     ];
+
+    /**
+     * Get the client's total completed session count.
+     * Takes the higher of the explicit integer field (sessions_completed)
+     * and the count of completed Session records in consultation_sessions.
+     */
+    public function getCompletedSessionsCount(): int
+    {
+        $relationCount = $this->sessions()->where('status', 'completed')->count();
+        return max((int) ($this->sessions_completed ?? 0), $relationCount);
+    }
 
     public function matchedTc(): BelongsTo
     {

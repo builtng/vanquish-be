@@ -380,9 +380,14 @@ class ClientController extends Controller
             'status' => 'nullable|string|max:50',
             'allocated_day' => 'nullable|string|max:50',
             'allocated_time' => 'nullable|string|max:50',
+            'sessions_completed' => 'nullable|integer|min:0',
         ]);
 
         $client->update($validated);
+
+        if (array_key_exists('sessions_completed', $validated)) {
+            app(\App\Services\ClientFeedbackService::class)->sendMilestoneFeedbackIfEligible($client);
+        }
 
         // Log activity
         ActivityLog::create([
@@ -1228,13 +1233,17 @@ class ClientController extends Controller
         }
 
         // Send email
-        $baseUrl = rtrim(config('app.frontend_url'), '/');
+        $feedbackUrl = DB::table('company_settings')->where('key', 'feedback_form_url')->value('value');
+        if (empty($feedbackUrl)) {
+            $baseUrl = rtrim(config('app.frontend_url'), '/');
+            $feedbackUrl = $baseUrl . '/feedback-form?' . http_build_query(['uuid' => $client->uuid]);
+        }
         $success = $this->emailService->sendAndLog(
             $client,
             'feedback_form',
             [
                 'client_name' => $client->name,
-                'feedback_url' => $baseUrl . '/feedback-form?' . http_build_query(['uuid' => $client->uuid])
+                'feedback_url' => $feedbackUrl,
             ]
         );
 
