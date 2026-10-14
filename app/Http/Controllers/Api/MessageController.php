@@ -46,6 +46,11 @@ class MessageController extends Controller
             })->where('is_trashed', false);
 
             $messages = $query->orderBy('id', 'desc')->paginate(50);
+            if ($user->isCounsellor()) {
+                $messages->getCollection()->transform(function ($msg) use ($user) {
+                    return $this->maskMessageForCounsellor($msg, $user->id);
+                });
+            }
             return response()->json($messages);
         }
 
@@ -141,6 +146,12 @@ class MessageController extends Controller
 
         $messages = $query->orderBy('id', 'desc')->paginate(50);
 
+        if ($user->isCounsellor()) {
+            $messages->getCollection()->transform(function ($msg) use ($user) {
+                return $this->maskMessageForCounsellor($msg, $user->id);
+            });
+        }
+
         return response()->json($messages);
     }
 
@@ -151,7 +162,7 @@ class MessageController extends Controller
     {
         $user = $request->user();
 
-        // ── Counsellors: always see exactly ONE thread — "Admin Support" ──
+        // ── Counsellors: always see exactly ONE thread — "Staff Support" ──
         if ($user->isCounsellor() && $user->training_counsellor_id) {
             $tcId = $user->training_counsellor_id;
 
@@ -186,10 +197,10 @@ class MessageController extends Controller
                         'peer_id'    => 'admin_group',
                         'peer_uuid'  => 'admin_group',
                         'peer_type'  => 'group',
-                        'peer_name'  => 'Admin Support',
+                        'peer_name'  => 'Staff Support',
                         'last_message' => [
                             'id'           => null,
-                            'message'      => 'Send a message to the admin team.',
+                            'message'      => 'Send a message to Staff Support.',
                             'created_at'   => now()->toISOString(),
                             'from_user_id' => null,
                             'to_user_id'   => null,
@@ -200,12 +211,14 @@ class MessageController extends Controller
                 ]);
             }
 
+            $this->maskMessageForCounsellor($lastMsg, $user->id);
+
             return response()->json([
                 [
                     'peer_id'        => 'admin_group',
                     'peer_uuid'      => 'admin_group',
                     'peer_type'      => 'group',
-                    'peer_name'      => 'Admin Support',
+                    'peer_name'      => 'Staff Support',
                     'last_message'   => $lastMsg,
                     'unread_for_user'=> $hasUnread,
                 ]
@@ -347,6 +360,11 @@ class MessageController extends Controller
                               ->where('to_user_id', $user->id);
                         }
                     })->exists();
+
+                if ($user->isCounsellor()) {
+                    $peerName = 'Staff Support';
+                    $this->maskMessageForCounsellor($msg, $user->id);
+                }
 
                 $conversations[] = [
                     'peer_id' => $peerId,
@@ -554,6 +572,18 @@ class MessageController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        // Counsellors see only "Staff Support", with no staff names or emails
+        if ($user->isCounsellor()) {
+            return response()->json([
+                [
+                    'id'    => 'admin_group',
+                    'name'  => 'Staff Support',
+                    'email' => null,
+                    'role'  => 'support',
+                ]
+            ]);
+        }
+
         $staffRoles = ['super_admin', 'admin', 'staff', 'consultation_staff', 'compliance_officer'];
 
         $staffUsers = \App\Models\User::select('id', 'name', 'email', 'role')
@@ -593,7 +623,7 @@ class MessageController extends Controller
                 'from_user_id'  => $user->id,
                 'to_user_id'    => null,
                 'to_tc_id'      => null,
-                'subject'       => $request->get('subject', 'Admin Support'),
+                'subject'       => $request->get('subject', 'Staff Support'),
                 'message'       => $request->get('message'),
                 'type'          => 'counsellor_to_staff',
                 'attachment_path' => $attachmentPath,
@@ -641,7 +671,7 @@ class MessageController extends Controller
                 }
             }
 
-            return response()->json(['message' => 'Message sent to admin team.'], 201);
+            return response()->json(['message' => 'Message sent to Staff Support.'], 201);
         }
 
         $validated = $request->validate([
@@ -931,6 +961,10 @@ class MessageController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        if ($user->isCounsellor()) {
+            $this->maskMessageForCounsellor($message, $user->id);
+        }
+
         return response()->json($message);
     }
     /**
@@ -1139,5 +1173,37 @@ class MessageController extends Controller
     {
         $cacheKey = "msg_notif_" . md5(strtolower(trim($recipientEmail)) . "_{$conversationKey}");
         Cache::put($cacheKey, true, now()->addMinutes(15));
+    }
+
+    /**
+     * Mask staff details for counsellor viewing so counsellors only see "Staff Support"
+     */
+    protected function maskMessageForCounsellor(Message $message, $counsellorUserId)
+    {
+        // Mask sender if staff
+        if ($message->fromUser && (int)$message->from_user_id !== (int)$counsellorUserId) {
+            $message->fromUser->name = 'Staff Support';
+            $message->fromUser->email = null;
+            $message->fromUser->makeHidden(['email', 'phone', 'first_name', 'last_name']);
+        }
+
+        // Mask recipient if staff
+        if ($message->toUser && (int)$message->to_user_id !== (int)$counsellorUserId) {
+            $message->toUser->name = 'Staff Support';
+            $message->toUser->email = null;
+            $message->toUser->makeHidden(['email', 'phone', 'first_name', 'last_name']);
+        }
+
+        // Mask parent message sender if staff
+        if ($message->parentMessage && $message->parentMessage->fromUser && (int)$message->parentMessage->from_user_id !== (int)$counsellorUserId) {
+            $message->parentMessage->fromUser->name = 'Staff Support';
+            $message->parentMessage->fromUser->email = null;
+            $message->parentMessage->fromUser->makeHidden(['email', 'phone', 'first_name', 'last_name']);
+        }
+
+        // Counsellors should never see staff CC list
+        $message->cc_users = [];
+
+        return $message;
     }
 }
