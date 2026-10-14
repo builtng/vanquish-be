@@ -558,7 +558,7 @@ class DynamicEmail extends Mailable
     <p>We hope this email finds you well.</p>
     <p>Congratulations on making it to the <strong>2nd stage out of 3</strong> of our vetting and interview process!</p>
     <p>This video interview process will take approximately <strong>15-20 minutes</strong> to complete. Please ensure you are in a quiet, private environment, and free from distractions before beginning, as your full attention is important. We appreciate your time and thoughtful responses.</p>
-    <p><strong>We are inviting you to answer five simple questions - there are no trick questions. We are simply hoping to learn more about you and hear from your authentic, genuine self.</strong></p>
+    <p><strong>We are inviting you to answer a few questions - there are no trick questions. We are simply hoping to learn more about you and hear from your authentic, genuine self.</strong></p>
     <p><strong>Please note the following below:</strong></p>
     <ul>
         <li>You will have <strong>3 working days</strong> to begin this interview. If you do not begin the interview within this time frame, the link will expire, and you will need to reapply for the placement.</li>
