@@ -41,7 +41,26 @@ class ClientConsultationSlotController extends Controller
             ->unique('consultation_datetime')
             ->values();
 
-        return response()->json($slots);
+        $sanitized = $slots->map(function ($slot) {
+            $isAvailable = ($slot->status === 'available' || $slot->status === 'open')
+                && (is_null($slot->max_slots) || $slot->booked_slots < $slot->max_slots);
+
+            $datetime = $slot->consultation_datetime ? $slot->consultation_datetime->toIso8601String() : null;
+
+            return [
+                'id' => $slot->id,
+                'datetime' => $datetime,
+                'consultation_datetime' => $datetime,
+                'type' => $slot->type ?? 'consultation',
+                'status' => $slot->status,
+                'is_available' => $isAvailable,
+                'availability' => $isAvailable,
+                'max_slots' => $slot->max_slots,
+                'booked_slots' => $slot->booked_slots,
+            ];
+        });
+
+        return response()->json($sanitized);
     }
 
     public function bookConsultation(Request $request)
