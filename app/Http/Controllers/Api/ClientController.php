@@ -68,7 +68,8 @@ class ClientController extends Controller
                 'Sessions Booked',
                 'Sessions Bookable',
                 'Active Therapy',
-                'Application & Assessment form Submitted'
+                'Application & Assessment form Submitted',
+                'Awaiting payment',
             ];
             if (in_array($request->stage, $validStages)) {
                 $query->where('stage', $request->stage);
@@ -523,7 +524,7 @@ class ClientController extends Controller
         }
 
         $request->validate([
-            'stage' => 'required|in:Consultation Booked,Consultation Completed,Agreement Sent,Agreement Signed,Matched with counsellor,Matched With Counsellor,Matched with TC,Sessions Booked,Sessions Bookable,Active Therapy,Application & Assessment form Submitted',
+            'stage' => 'required|in:Consultation Booked,Consultation Completed,Agreement Sent,Agreement Signed,Matched with counsellor,Matched With Counsellor,Matched with TC,Sessions Booked,Sessions Bookable,Active Therapy,Application & Assessment form Submitted,Awaiting payment',
         ]);
 
         $oldStage = $client->stage;

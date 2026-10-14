@@ -83,7 +83,7 @@ class RejoiningClientCaseTest extends TestCase
         $this->assertNotEquals('CL001', $newClient->client_id);
         $this->assertEquals('Alice Smith-Jones', $newClient->name);
         $this->assertEquals('07999999999', $newClient->phone);
-        $this->assertEquals('Application & Assessment form Submitted', $newClient->stage);
+        $this->assertEquals('Awaiting payment', $newClient->stage);
         $this->assertEquals('Mid Range', $newClient->service_type);
         $this->assertEquals(['Depression', 'Bereavement'], $newClient->primary_issues);
     }

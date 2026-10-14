@@ -252,7 +252,7 @@ class IntakeFormController extends Controller
                     'emergency_contact_relationship' => $validated['emergency_contact_relationship'] ?? null,
                     'core34_answers' => $validated['core34_answers'] ?? [],
                     'submitted_date' => now(),
-                    'stage' => 'Application & Assessment form Submitted',
+                    'stage' => 'Awaiting payment',
                     'is_couples' => $validated['is_couples'] ?? false,
                     'partner_first_name' => $validated['partner_first_name'] ?? null,
                     'partner_last_name' => $validated['partner_last_name'] ?? null,
