@@ -11,6 +11,8 @@ use App\Models\Client;
 use App\Models\TrainingCounsellor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use App\Mail\DynamicEmail;
 use Carbon\Carbon;
 
@@ -387,6 +389,22 @@ class IntakeFormController extends Controller
                 }
             }
 
+            // Closure to validate single-use document upload tokens and reject external URLs or raw paths
+            $validateDocToken = function ($attribute, $value, $fail) {
+                if (empty($value)) return;
+                if (is_string($value)) {
+                    if (filter_var($value, FILTER_VALIDATE_URL) || str_contains($value, '/') || str_contains($value, '\\') || str_contains($value, 'storage') || !preg_match('/^[a-zA-Z0-9]{32,64}$/', $value)) {
+                        $fail("The {$attribute} must be a valid one-time upload token. External URLs and raw file paths are not allowed.");
+                        return;
+                    }
+                    $stored = Cache::get("tc_upload_token:{$value}");
+                    if (!$stored) {
+                        $fail("The upload token for {$attribute} is invalid or has expired. Please re-upload the document.");
+                        return;
+                    }
+                }
+            };
+
             // Validate form fields
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
@@ -453,13 +471,18 @@ class IntakeFormController extends Controller
                 // PSG
                 'psg_day_preference' => 'nullable|string|max:100',
                 'psg_reason' => 'nullable|string',
-            // Document validations - supports uploaded files OR pre-uploaded document URL strings
-            'fitnessTopractice' => $request->hasFile('fitnessTopractice') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
-            'qualifications' => $request->hasFile('qualifications') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
-            'dbs' => $request->hasFile('dbs') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
-            'cv' => $request->hasFile('cv') ? 'file|mimes:pdf,doc,docx|max:10240' : 'nullable|string|max:1000',
-            'validId' => $request->hasFile('validId') ? 'file|mimes:pdf,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
-            'insurance' => $request->hasFile('insurance') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
+
+            // Document validations - supports uploaded files OR one-time upload tokens
+            'fitnessTopractice' => $request->hasFile('fitnessTopractice') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'fitness_to_practice' => $request->hasFile('fitness_to_practice') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'qualifications' => $request->hasFile('qualifications') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'dbs' => $request->hasFile('dbs') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'dbs_certificate' => $request->hasFile('dbs_certificate') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'cv' => $request->hasFile('cv') ? 'file|mimes:pdf,doc,docx|max:10240' : ['nullable', $validateDocToken],
+            'validId' => $request->hasFile('validId') ? 'file|mimes:pdf,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'valid_id' => $request->hasFile('valid_id') ? 'file|mimes:pdf,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'insurance' => $request->hasFile('insurance') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
+            'insurance_certificate' => $request->hasFile('insurance_certificate') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : ['nullable', $validateDocToken],
             'create_tc' => 'nullable|boolean',
         ], [
             'validId.file' => 'Please upload a valid ID document',
@@ -544,6 +567,7 @@ class IntakeFormController extends Controller
                 'insurance_certificate' => 'insurance_certificate',
             ];
 
+            $tokensToForget = [];
             foreach ($documentFields as $requestField => $dbField) {
                 if ($request->hasFile($requestField)) {
                     $file = $request->file($requestField);
@@ -555,12 +579,22 @@ class IntakeFormController extends Controller
                     $path = $file->storeAs("tc_intake_forms/documents/{$dbField}", $filename, 'private');
                     $formData[$dbField] = $path;
                 } elseif ($request->filled($requestField) && is_string($request->input($requestField))) {
-                    $formData[$dbField] = $request->input($requestField);
+                    $token = $request->input($requestField);
+                    $storedPath = Cache::get("tc_upload_token:{$token}");
+                    if ($storedPath) {
+                        $formData[$dbField] = $storedPath;
+                        $tokensToForget[] = $token;
+                    }
                 }
             }
 
             // Create the intake form
             $form = TcIntakeForm::create($formData);
+
+            // Delete used single-use upload tokens
+            foreach ($tokensToForget as $tokenToForget) {
+                Cache::forget("tc_upload_token:{$tokenToForget}");
+            }
 
             // Also Create a recruitment-style TraineeApplication so it shows up in the unified dashboard
             try {
@@ -811,36 +845,18 @@ class IntakeFormController extends Controller
         $filename = time() . '_' . uniqid() . '_' . $sanitizedName;
 
         $path = $file->storeAs("tc_intake_forms/documents/{$field}", $filename, 'private');
-        $url = $path;
 
-        // Optionally associate with trainee application if id passed
-        $appId = $request->input('trainee_application_id') ?? $request->input('application_id');
-        if (!empty($appId)) {
-            $app = is_numeric($appId) ? TraineeApplication::find($appId) : TraineeApplication::where('uuid', $appId)->first();
-            if ($app) {
-                $docColMap = [
-                    'fitnessTopractice' => 'doc_fitness_to_practise',
-                    'fitness_to_practice' => 'doc_fitness_to_practise',
-                    'qualifications' => 'doc_prior_qualifications',
-                    'dbs' => 'doc_dbs_certificate',
-                    'dbs_certificate' => 'doc_dbs_certificate',
-                    'cv' => 'doc_cv',
-                    'validId' => 'doc_valid_id',
-                    'valid_id' => 'doc_valid_id',
-                    'insurance' => 'doc_indemnity_insurance',
-                    'insurance_certificate' => 'doc_indemnity_insurance',
-                ];
-                if (isset($docColMap[$field])) {
-                    $app->update([$docColMap[$field] => $url]);
-                }
-            }
-        }
+        // One-time 40-character upload token stored in cache for 24 hours
+        $uploadToken = Str::random(40);
+        Cache::put("tc_upload_token:{$uploadToken}", $path, now()->addHours(24));
 
         return response()->json([
             'success' => true,
             'message' => 'Document uploaded successfully',
-            'file_path' => $path,
-            'url' => $url,
+            'upload_token' => $uploadToken,
+            'token' => $uploadToken,
+            'file_path' => $uploadToken,
+            'url' => $uploadToken,
             'original_name' => $originalName,
         ]);
     }
