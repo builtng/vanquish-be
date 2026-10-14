@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\ApplicationPipelineService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class QcApplicationController extends Controller
@@ -598,5 +599,74 @@ class QcApplicationController extends Controller
         );
 
         return response()->json($result['application']);
+    }
+
+    /**
+     * Download a qualified counsellor applicant document securely via authenticated route.
+     */
+    public function downloadDocument(Request $request, $id, $field)
+    {
+        $app = $this->findApplication($id);
+
+        $fieldMap = [
+            'qualification_document' => 'qualification_document',
+            'qualification' => 'qualification_document',
+            'dbs_certificate_qualified' => 'dbs_certificate_qualified',
+            'dbs' => 'dbs_certificate_qualified',
+            'insurance_qualified' => 'insurance_qualified',
+            'insurance' => 'insurance_qualified',
+            'self_employment_proof' => 'self_employment_proof',
+            'self_employment' => 'self_employment_proof',
+            'professional_membership' => 'professional_membership',
+            'membership' => 'professional_membership',
+            'valid_id_document' => 'valid_id_document',
+            'valid_id' => 'valid_id_document',
+            'id' => 'valid_id_document',
+        ];
+
+        if (!isset($fieldMap[$field])) {
+            return response()->json(['message' => 'Invalid document field'], 400);
+        }
+
+        $column = $fieldMap[$field];
+        $path = $app->$column;
+
+        if (!$path) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        // External CDN URL (e.g., JotForm CDN) that does not contain /storage/
+        if (filter_var($path, FILTER_VALIDATE_URL) && !str_contains($path, '/storage/')) {
+            return redirect($path);
+        }
+
+        if (filter_var($path, FILTER_VALIDATE_URL)) {
+            $parsedUrl = parse_url($path);
+            $urlPath = $parsedUrl['path'] ?? '';
+            if (str_contains($urlPath, '/storage/')) {
+                $path = substr($urlPath, strpos($urlPath, '/storage/') + 9);
+            }
+        }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, 8);
+        }
+
+        $disk = null;
+        if (Storage::disk('private')->exists($path)) {
+            $disk = 'private';
+        } elseif (Storage::disk('public')->exists($path)) {
+            $disk = 'public';
+        }
+
+        if (!$disk) {
+            return response()->json(['message' => 'File does not exist in storage'], 404);
+        }
+
+        $filename = basename($path);
+        $cleanFilename = preg_replace('/^\d+_[a-f0-9]+_/', '', $filename);
+
+        return Storage::disk($disk)->download($path, $cleanFilename);
     }
 }

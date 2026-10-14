@@ -139,4 +139,57 @@ class TrainingCounsellorDocumentTest extends TestCase
 
         $response->assertStatus(404);
     }
+
+    public function test_Z02_document_not_public()
+    {
+        Storage::fake('public');
+        Storage::fake('private');
+
+        $staff = $this->getStaffUser();
+
+        $tc = TrainingCounsellor::create([
+            'tc_id' => 'TC-10006',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'John Doe',
+            'email' => 'john@test.com',
+            'dbs_certificate_qualified' => 'qualified_counsellors/1/dbs/123_test_dbs.pdf',
+        ]);
+
+        // Put file only on private disk
+        Storage::disk('private')->put($tc->dbs_certificate_qualified, 'private dbs content');
+
+        // File must not exist on public disk
+        $this->assertFalse(Storage::disk('public')->exists($tc->dbs_certificate_qualified));
+        $this->assertTrue(Storage::disk('private')->exists($tc->dbs_certificate_qualified));
+
+        // Public/unauthenticated access must be refused
+        $response = $this->getJson("/api/training-counsellors/{$tc->uuid}/document/dbs_certificate_qualified");
+        $response->assertStatus(401);
+    }
+
+    public function test_Z02_staff_can_download()
+    {
+        Storage::fake('public');
+        Storage::fake('private');
+
+        $staff = $this->getStaffUser();
+
+        $tc = TrainingCounsellor::create([
+            'tc_id' => 'TC-10007',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Jane Doe',
+            'email' => 'jane@test.com',
+            'dbs_certificate_qualified' => 'qualified_counsellors/1/dbs/123456_abc123_dbs.pdf',
+        ]);
+
+        Storage::disk('private')->put($tc->dbs_certificate_qualified, 'dbs binary content');
+
+        // Staff can download through authenticated route
+        $response = $this->actingAs($staff, 'sanctum')
+            ->getJson("/api/training-counsellors/{$tc->uuid}/document/dbs_certificate_qualified");
+
+        $response->assertStatus(200);
+        $response->assertHeader('content-disposition', 'attachment; filename=dbs.pdf');
+    }
 }
+

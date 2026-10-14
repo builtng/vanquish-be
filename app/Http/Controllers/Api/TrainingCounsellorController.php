@@ -199,7 +199,7 @@ class TrainingCounsellorController extends Controller
                 $file = $request->file($fileField);
                 $sanitizedName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
                 $filename = time() . '_' . uniqid() . '_' . substr($sanitizedName, 0, 255);
-                $documentUpdates[$column] = $file->storeAs("qualified_counsellors/{$tc->id}/{$column}", $filename, 'public');
+                $documentUpdates[$column] = $file->storeAs("qualified_counsellors/{$tc->id}/{$column}", $filename, 'private');
             }
         }
         if (!empty($documentUpdates)) {
@@ -1160,7 +1160,7 @@ class TrainingCounsellorController extends Controller
         }
 
         if ($qcApp) {
-            $path = $file->storeAs("qualified_counsellors/applications/{$qcApp->id}/{$field}", $filename, 'public');
+            $path = $file->storeAs("qualified_counsellors/applications/{$qcApp->id}/{$field}", $filename, 'private');
             $docFields = [
                 'qualification' => 'qualification_document',
                 'qualification_document' => 'qualification_document',
@@ -1192,9 +1192,9 @@ class TrainingCounsellorController extends Controller
             }
 
             $tcFolder = $tc ? $tc->id : 'uploads';
-            $path = $file->storeAs("qualified_counsellors/{$tcFolder}/{$field}", $filename, 'public');
+            $path = $file->storeAs("qualified_counsellors/{$tcFolder}/{$field}", $filename, 'private');
         } else {
-            $path = $file->storeAs("qualified_counsellors/onboarding/{$field}", $filename, 'public');
+            $path = $file->storeAs("qualified_counsellors/onboarding/{$field}", $filename, 'private');
         }
 
         return response()->json([
@@ -1800,19 +1800,52 @@ class TrainingCounsellorController extends Controller
 
     public function downloadDocument(Request $request, TrainingCounsellor $tc, $field)
     {
-        $allowedFields = [
-            'qualification_document',
-            'dbs_certificate_qualified',
-            'insurance_qualified',
-            'self_employment_proof',
-            'professional_membership',
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+        if (!in_array($user->role, ['admin', 'staff', 'superadmin']) && $user->id !== $tc->user_id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $fieldMap = [
+            'qualification_document' => 'qualification_document',
+            'dbs_certificate_qualified' => 'dbs_certificate_qualified',
+            'insurance_qualified' => 'insurance_qualified',
+            'self_employment_proof' => 'self_employment_proof',
+            'professional_membership' => 'professional_membership',
+            'valid_id_document' => 'valid_id_document',
+            'dbs_certificate' => 'dbs_certificate',
+            'insurance_certificate' => 'insurance_certificate',
+            'cv' => 'cv',
+            'qualifications' => 'qualifications',
+            'student_id' => 'student_id',
+            'dbs_intake' => 'dbs_certificate',
+            'insurance_intake' => 'insurance_certificate',
+            'fitness_to_practice' => 'doc_fitness_to_practise',
+            'doc_fitness_to_practise' => 'doc_fitness_to_practise',
+            'doc_prior_qualifications' => 'doc_prior_qualifications',
+            'doc_dbs_certificate' => 'doc_dbs_certificate',
+            'doc_cv' => 'doc_cv',
+            'doc_valid_id' => 'doc_valid_id',
+            'doc_indemnity_insurance' => 'doc_indemnity_insurance',
         ];
 
-        if (!in_array($field, $allowedFields)) {
+        if (!isset($fieldMap[$field])) {
             return response()->json(['message' => 'Invalid document field'], 400);
         }
 
-        $path = $tc->$field;
+        $col = $fieldMap[$field];
+        $path = $tc->$col;
+
+        if (!$path && $tc->intakeForm && $tc->intakeForm->count() > 0) {
+            $intake = $tc->intakeForm->first();
+            $path = $intake->$col ?? null;
+        }
+
+        if (!$path && $tc->traineeApplication) {
+            $path = $tc->traineeApplication->$col ?? null;
+        }
 
         if (!$path) {
             return response()->json(['message' => 'Document not found'], 404);
@@ -1833,7 +1866,14 @@ class TrainingCounsellorController extends Controller
             $path = substr($path, 8);
         }
 
-        if (!Storage::disk('public')->exists($path)) {
+        $disk = null;
+        if (Storage::disk('private')->exists($path)) {
+            $disk = 'private';
+        } elseif (Storage::disk('public')->exists($path)) {
+            $disk = 'public';
+        }
+
+        if (!$disk) {
             return response()->json(['message' => 'File does not exist in storage'], 404);
         }
 
@@ -1841,7 +1881,7 @@ class TrainingCounsellorController extends Controller
         // Strip out the timestamp/uniqid prefix (e.g. 169123456_654321_filename.pdf) if present
         $cleanFilename = preg_replace('/^\d+_[a-f0-9]+_/', '', $filename);
 
-        return Storage::disk('public')->download($path, $cleanFilename);
+        return Storage::disk($disk)->download($path, $cleanFilename);
     }
 
     /**

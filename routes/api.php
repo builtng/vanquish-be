@@ -182,13 +182,15 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::delete('/training-counsellors/{tc}/holidays/{holiday}', [TrainingCounsellorHolidayController::class, 'destroy']);
         Route::get('/training-counsellors/{tc}/caseload', [TrainingCounsellorController::class, 'caseload']);
         Route::get('/training-counsellors/{tc}/slot-bookings', [TrainingCounsellorController::class, 'getSlotBookings']);
-        Route::get('/training-counsellors/{tc}/document/{field}', [TrainingCounsellorController::class, 'downloadDocument']);
         Route::get('/training-counsellor-holidays/pending', [TrainingCounsellorHolidayController::class, 'pending']);
         Route::patch('/training-counsellor-holidays/{holiday}/approve', [TrainingCounsellorHolidayController::class, 'approve']);
         Route::patch('/training-counsellor-holidays/{holiday}/reject', [TrainingCounsellorHolidayController::class, 'reject']);
         Route::get('/training-counsellors/{tc}/conduct-events', [TcConductEventController::class, 'index']);
         Route::post('/training-counsellors/{tc}/conduct-events', [TcConductEventController::class, 'store']);
     });
+
+    // Counsellor document download (staff or the counsellor)
+    Route::get('/training-counsellors/{tc}/document/{field}', [TrainingCounsellorController::class, 'downloadDocument']);
 
     // Counsellor portal endpoints (counsellors can access their own data)
     Route::middleware('auth:sanctum')->group(function () {
@@ -212,6 +214,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/training-counsellors/{tc}/send-qualified-form-email', [TrainingCounsellorController::class, 'sendQualifiedFormEmail']);
         Route::get('/qc-applications', [QcApplicationController::class, 'index']);
         Route::get('/qc-applications/{id}', [QcApplicationController::class, 'show']);
+        Route::get('/qc-applications/{id}/document/{field}', [QcApplicationController::class, 'downloadDocument']);
         Route::post('/qc-applications/{id}/accept', [QcApplicationController::class, 'accept']);
         Route::post('/qc-applications/{id}/link', [QcApplicationController::class, 'link']);
         Route::post('/qc-applications/{id}/reject', [QcApplicationController::class, 'reject']);
@@ -331,6 +334,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/trainee-applications', [TraineeApplicationController::class, 'index']);
         Route::get('/trainee-applications/count', [TraineeApplicationController::class, 'pendingCount']);
         Route::get('/trainee-applications/{trainee_application}', [TraineeApplicationController::class, 'show']);
+        Route::get('/trainee-applications/{id}/document/{field}', [TraineeApplicationController::class, 'downloadDocument']);
         Route::post('/trainee-applications/send-invite-email', [TraineeApplicationController::class, 'inviteEmail']);
         Route::post('/trainee-applications/{trainee_application}/status', [TraineeApplicationController::class, 'updateStatus']);
         Route::post('/trainee-applications/{trainee_application}/invite', [TraineeApplicationController::class, 'sendInvite']);

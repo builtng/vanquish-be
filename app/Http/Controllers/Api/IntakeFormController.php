@@ -552,10 +552,8 @@ class IntakeFormController extends Controller
                     $originalName = $file->getClientOriginalName();
                     $sanitizedName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName);
                     $filename = time() . '_' . uniqid() . '_' . $sanitizedName;
-
-                    $path = $file->storeAs("tc_intake_forms/documents/{$dbField}", $filename, 'public');
-                    // Store full URL or path depending on app config
-                    $formData[$dbField] = config('app.url') . '/storage/' . $path;
+                    $path = $file->storeAs("tc_intake_forms/documents/{$dbField}", $filename, 'private');
+                    $formData[$dbField] = $path;
                 } elseif ($request->filled($requestField) && is_string($request->input($requestField))) {
                     $formData[$dbField] = $request->input($requestField);
                 }
@@ -812,8 +810,8 @@ class IntakeFormController extends Controller
         $sanitizedName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName);
         $filename = time() . '_' . uniqid() . '_' . $sanitizedName;
 
-        $path = $file->storeAs("tc_intake_forms/documents/{$field}", $filename, 'public');
-        $url = config('app.url') . '/storage/' . $path;
+        $path = $file->storeAs("tc_intake_forms/documents/{$field}", $filename, 'private');
+        $url = $path;
 
         // Optionally associate with trainee application if id passed
         $appId = $request->input('trainee_application_id') ?? $request->input('application_id');

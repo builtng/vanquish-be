@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 use App\Services\EmailService;
 use App\Services\ApplicationPipelineService;
@@ -994,5 +995,84 @@ class TraineeApplicationController extends Controller
             'message' => 'Response recorded, thank you.',
             'application' => $application->fresh(),
         ]);
+    }
+
+    /**
+     * Download an applicant document securely via authenticated route.
+     */
+    public function downloadDocument(Request $request, $id, $field)
+    {
+        $application = is_numeric($id)
+            ? TraineeApplication::find($id)
+            : TraineeApplication::where('uuid', $id)->first();
+
+        if (!$application) {
+            return response()->json(['message' => 'Application not found'], 404);
+        }
+
+        $fieldMap = [
+            'doc_fitness_to_practise' => 'doc_fitness_to_practise',
+            'fitness_to_practise' => 'doc_fitness_to_practise',
+            'fitness_to_practice' => 'doc_fitness_to_practise',
+            'doc_prior_qualifications' => 'doc_prior_qualifications',
+            'prior_qualifications' => 'doc_prior_qualifications',
+            'qualifications' => 'doc_prior_qualifications',
+            'doc_dbs_certificate' => 'doc_dbs_certificate',
+            'dbs_certificate' => 'doc_dbs_certificate',
+            'dbs' => 'doc_dbs_certificate',
+            'doc_cv' => 'doc_cv',
+            'cv' => 'doc_cv',
+            'doc_valid_id' => 'doc_valid_id',
+            'valid_id' => 'doc_valid_id',
+            'id_document' => 'doc_valid_id',
+            'doc_indemnity_insurance' => 'doc_indemnity_insurance',
+            'indemnity_insurance' => 'doc_indemnity_insurance',
+            'insurance' => 'doc_indemnity_insurance',
+        ];
+
+        if (!isset($fieldMap[$field])) {
+            return response()->json(['message' => 'Invalid document field'], 400);
+        }
+
+        $column = $fieldMap[$field];
+        $path = $application->$column;
+
+        if (!$path) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        // External CDN URL (e.g., JotForm CDN) that does not contain /storage/
+        if (filter_var($path, FILTER_VALIDATE_URL) && !str_contains($path, '/storage/')) {
+            return redirect($path);
+        }
+
+        if (filter_var($path, FILTER_VALIDATE_URL)) {
+            $parsedUrl = parse_url($path);
+            $urlPath = $parsedUrl['path'] ?? '';
+            if (str_contains($urlPath, '/storage/')) {
+                $path = substr($urlPath, strpos($urlPath, '/storage/') + 9);
+            }
+        }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, 8);
+        }
+
+        $disk = null;
+        if (Storage::disk('private')->exists($path)) {
+            $disk = 'private';
+        } elseif (Storage::disk('public')->exists($path)) {
+            $disk = 'public';
+        }
+
+        if (!$disk) {
+            return response()->json(['message' => 'File does not exist in storage'], 404);
+        }
+
+        $filename = basename($path);
+        $cleanFilename = preg_replace('/^\d+_[a-f0-9]+_/', '', $filename);
+
+        return Storage::disk($disk)->download($path, $cleanFilename);
     }
 }
