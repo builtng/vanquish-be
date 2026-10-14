@@ -139,23 +139,12 @@ class MapSupportAreasCanonicalCommandTest extends TestCase
         $this->assertEquals(['Childhood trauma'], $qcExp);
     }
 
-    public function test_maintenance_command_route()
+    public function test_maintenance_command_route_does_not_exist()
     {
-        // Unauthorized without token
         $response = $this->getJson('/api/maintenance/command');
-        $response->assertStatus(401);
+        $response->assertStatus(404);
 
-        // Execute optimize:clear
-        $response = $this->getJson('/api/maintenance/command?token=vqt_secret_migrate_2026&cmd=optimize:clear');
-        $response->assertStatus(200);
-        $response->assertJsonStructure(['command', 'output', 'opcache_reset']);
-        $this->assertEquals('optimize:clear', $response->json('command'));
-
-        // Execute vqt:map-support-areas dry run
-        $response = $this->getJson('/api/maintenance/command?token=vqt_secret_migrate_2026&cmd=vqt:map-support-areas&dry_run=1');
-        $response->assertStatus(200);
-        $response->assertJsonStructure(['command', 'dry_run', 'output']);
-        $this->assertTrue($response->json('dry_run'));
-        $this->assertStringContainsString('[DRY RUN]', $response->json('output'));
+        $responsePost = $this->postJson('/api/maintenance/command');
+        $responsePost->assertStatus(404);
     }
 }
