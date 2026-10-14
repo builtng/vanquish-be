@@ -68,7 +68,7 @@
             <div style="background-color: #fef3c7; border-left: 4px solid #eab308; padding: 20px; margin: 25px 0; border-radius: 4px;">
                 <p style="margin: 0 0 10px 0; color: #333333; font-size: 15px; font-weight: 600;">📌 Key Information</p>
                 <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #333333; font-size: 14px; line-height: 1.8;">
-                    <li>All client work must be documented within 24 hours of each session</li>
+                    <li>All session notes must be submitted immediately after your session</li>
                     <li>Supervision sessions are mandatory and scheduled regularly</li>
                     <li>Maintain professional boundaries and ethical standards at all times</li>
                     <li>Report any concerns or safeguarding issues immediately</li>
