@@ -101,7 +101,7 @@ class PaymentController extends Controller
 
         $validated = $request->validate([
             'client_id' => 'required',
-            'amount' => 'required|numeric|min:0.50',
+            'amount' => 'nullable|numeric',
             'currency' => 'nullable|string|size:3',
             'coupon_code' => 'nullable|string|exists:coupons,code',
             'payment_type' => 'required|in:consultation,session,session_block',
@@ -110,9 +110,48 @@ class PaymentController extends Controller
             'consultation_slot_id' => 'nullable|exists:consultation_slots,id',
         ]);
 
+        $client = $this->resolveClient($validated['client_id']);
+
+        if (!$client) {
+            return response()->json(['message' => 'Client not found'], 404);
+        }
+
+        // Work out the price on the server from the live service settings,
+        // using the client's service type and the payment type. Ignore browser amount.
+        $serviceType = $client->service_type;
+        if (empty($serviceType)) {
+            $intake = \App\Models\ClientIntakeForm::where('client_id', $client->id)->latest()->first();
+            $serviceType = $intake->service_type ?? $request->input('service_type') ?? 'Mid Range';
+        }
+
+        $setting = \App\Models\ServiceSetting::where('service_name', $serviceType)->first();
+        if (!$setting) {
+            $cleanType = strtolower(trim((string) $serviceType));
+            if (str_contains($cleanType, 'low')) {
+                $setting = \App\Models\ServiceSetting::where('service_name', 'Low Cost')->first();
+            } elseif (str_contains($cleanType, 'coach')) {
+                $setting = \App\Models\ServiceSetting::where('service_name', 'Counselling & Coaching')->first();
+            } elseif (str_contains($cleanType, 'mid')) {
+                $setting = \App\Models\ServiceSetting::where('service_name', 'Mid Range')->first();
+            } elseif (str_contains($cleanType, 'ish')) {
+                $setting = \App\Models\ServiceSetting::where('service_name', 'Ish')->first();
+            }
+        }
+
+        $paymentType = $validated['payment_type'];
+        $serverAmount = 0.0;
+
+        if ($paymentType === 'consultation') {
+            $serverAmount = (float) ($setting->consultation_price ?? 15.00);
+        } elseif ($paymentType === 'session') {
+            $sessionCount = (!empty($validated['session_ids']) && is_array($validated['session_ids'])) ? count($validated['session_ids']) : 1;
+            $serverAmount = (float) ($setting->session_price ?? 40.00) * max(1, $sessionCount);
+        } elseif ($paymentType === 'session_block') {
+            $serverAmount = (float) ($setting->block_price ?? (($setting->session_price ?? 40.00) * 4));
+        }
 
         $currency = $validated['currency'] ?? 'gbp';
-        $originalAmount = $validated['amount'];
+        $originalAmount = $serverAmount;
         $finalAmount = $originalAmount;
         $discountAmount = 0;
         $couponId = null;
@@ -130,19 +169,12 @@ class PaymentController extends Controller
                     $finalAmount = max(0.50, $originalAmount - $discount);
                     $discountAmount = $originalAmount - $finalAmount;
                 }
-
-                // Track usage (increment on confirm, but for intent we just validate)
             }
         }
 
-        $amountInPence = (int)round($finalAmount * 100);
+        $amountInPence = (int) round($finalAmount * 100);
 
         try {
-            $client = $this->resolveClient($validated['client_id']);
-
-            if (!$client) {
-                return response()->json(['message' => 'Client not found'], 404);
-            }
 
             // Create or retrieve Stripe customer
             $customerId = $this->getOrCreateStripeCustomer($client, $request->email ?? $client->email);

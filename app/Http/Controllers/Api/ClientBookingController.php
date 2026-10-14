@@ -82,66 +82,93 @@ class ClientBookingController extends Controller
     public function authenticate(Request $request)
     {
         $validated = $request->validate([
-            'email' => 'required_without:client_uuid|nullable|email',
-            'client_uuid' => 'required_without:email|nullable|string',
+            'email' => 'nullable|email',
+            'client_uuid' => 'nullable|string',
+            'uuid' => 'nullable|string',
         ]);
 
-        $query = Client::query();
+        $clientUuid = $validated['client_uuid'] ?? $validated['uuid'] ?? $request->input('client_uuid') ?? $request->input('uuid');
+        $email = $validated['email'] ?? null;
 
-        if (!empty($validated['email'])) {
-            $query->where('email', $validated['email']);
-        }
+        // If private link (client_uuid) is provided, authenticate and load client
+        if (!empty($clientUuid)) {
+            $client = Client::where('uuid', $clientUuid)->first();
 
-        if (!empty($validated['client_uuid'])) {
-            $query->where('uuid', $validated['client_uuid']);
-        }
+            if (!$client) {
+                return response()->json(['message' => 'Client not found'], 404);
+            }
 
-        $client = $query->latest('id')->first();
+            // Check if client is matched
+            if (!$client->matched_tc_id) {
+                return response()->json([
+                    'message' => 'You have not been matched with a counsellor yet.',
+                    'client' => null,
+                ], 400);
+            }
 
-        if (!$client) {
-            return response()->json(['message' => 'Client not found'], 404);
-        }
+            // Get upcoming sessions
+            $upcomingSessions = $client->getUpcomingSessions(20);
 
-        // Check if client is matched and agreement signed
-        if (!$client->matched_tc_id) {
+            // Get next session needing booking (for Low Cost)
+            $nextSessionNeedingBooking = null;
+            if ($client->service_type === 'Low Cost') {
+                $nextSessionNeedingBooking = $client->getNextSessionNeedingBooking();
+            }
+
             return response()->json([
-                'message' => 'You have not been matched with a counsellor yet.',
-                'client' => null,
-            ], 400);
+                'client' => [
+                    'id' => $client->id,
+                    'uuid' => $client->uuid,
+                    'name' => $client->name,
+                    'email' => $client->email,
+                    'service_type' => $client->service_type,
+                    'allocated_day' => $client->allocated_day,
+                    'allocated_time' => $client->allocated_time,
+                    'next_booking_deadline' => $client->next_booking_deadline,
+                    'days_until_deadline' => $this->calculateDaysUntilDeadline($client),
+                    'matched_tc' => $client->matchedTc ? [
+                        'name' => $client->matchedTc->abbreviated_name,
+                        'uuid' => $client->matchedTc->uuid,
+                        'photo' => $client->matchedTc->photo,
+                        'photo_url' => $client->matchedTc->photo_url,
+                        'session_price' => $client->matchedTc->session_price,
+                    ] : null,
+                ],
+                'upcoming_sessions' => $upcomingSessions,
+                'next_session_needing_booking' => $nextSessionNeedingBooking,
+            ]);
         }
 
-        // We have removed the 'signed' requirement to allow consultation before signing
-        // Get upcoming sessions
-        $upcomingSessions = $client->getUpcomingSessions(20);
+        // Email-only request: never reveal whether the email exists.
+        // If the email matches a client, send that client their booking link by email.
+        if (!empty($email)) {
+            $client = Client::where('email', $email)->latest('id')->first();
+            if ($client && !empty($client->uuid)) {
+                $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
+                $bookingLink = $baseUrl . '/client-booking?uuid=' . $client->uuid;
 
-        // Get next session needing booking (for Low Cost)
-        $nextSessionNeedingBooking = null;
-        if ($client->service_type === 'Low Cost') {
-            $nextSessionNeedingBooking = $client->getNextSessionNeedingBooking();
+                try {
+                    $this->emailService->sendAndLog(
+                        $client,
+                        'generic_client_email',
+                        [
+                            'client_name' => $client->name,
+                            'message' => "You requested your private booking link for Vanquish Therapies.\n\nYou can access your booking portal using the link below:\n{$bookingLink}\n\nIf you did not request this link, you can safely ignore this email.",
+                        ]
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error("Failed sending booking link to {$email}: " . $e->getMessage());
+                }
+            }
+
+            return response()->json([
+                'message' => 'If this email is registered, we have sent you your booking link.',
+            ], 200);
         }
 
         return response()->json([
-            'client' => [
-                'id' => $client->id,
-                'uuid' => $client->uuid,
-                'name' => $client->name,
-                'email' => $client->email,
-                'service_type' => $client->service_type,
-                'allocated_day' => $client->allocated_day,
-                'allocated_time' => $client->allocated_time,
-                'next_booking_deadline' => $client->next_booking_deadline,
-                'days_until_deadline' => $this->calculateDaysUntilDeadline($client),
-                'matched_tc' => $client->matchedTc ? [
-                    'name' => $client->matchedTc->abbreviated_name,
-                    'uuid' => $client->matchedTc->uuid,
-                    'photo' => $client->matchedTc->photo,
-                    'photo_url' => $client->matchedTc->photo_url,
-                    'session_price' => $client->matchedTc->session_price,
-                ] : null,
-            ],
-            'upcoming_sessions' => $upcomingSessions,
-            'next_session_needing_booking' => $nextSessionNeedingBooking,
-        ]);
+            'message' => 'Please provide your booking link.',
+        ], 422);
     }
 
     /**
