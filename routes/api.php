@@ -111,12 +111,12 @@ Route::post('/payments/confirm', [PaymentController::class, 'confirmPayment']);
 // Webhook endpoint - no rate limiting but signature verification required
 Route::post('/payments/webhook', [PaymentController::class, 'handleWebhook'])->withoutMiddleware(['throttle:api']);
 
-// JotForm webhooks (public - no auth required)
-Route::post('/jotform/agreement-webhook', [JotFormWebhookController::class, 'handleAgreementSubmission'])->withoutMiddleware(['throttle:api']);
+// JotForm webhooks (protected with secret key and rate limiting)
+Route::post('/jotform/agreement-webhook', [JotFormWebhookController::class, 'handleAgreementSubmission'])->middleware('throttle:30,1');
 Route::post('/jotform/intake-webhook', [JotFormWebhookController::class, 'handleIntakeSubmission'])->withoutMiddleware(['throttle:api']);
 Route::post('/jotform/webhook/trainee', [JotFormWebhookController::class, 'handleTraineeSubmission'])->withoutMiddleware(['throttle:api']);
-Route::post('/jotform/personal-therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->withoutMiddleware(['throttle:api']);
-Route::post('/jotform/therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->withoutMiddleware(['throttle:api']);
+Route::post('/jotform/personal-therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->middleware('throttle:30,1');
+Route::post('/jotform/therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->middleware('throttle:30,1');
 
 // HireVire webhook (Stage 2 video completion)
 Route::post('/hirevire/webhook', [HireVireWebhookController::class, 'handleSubmission'])->withoutMiddleware(['throttle:api']);

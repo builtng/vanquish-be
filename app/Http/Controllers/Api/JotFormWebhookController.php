@@ -22,12 +22,42 @@ class JotFormWebhookController extends Controller
     {
         $this->emailService = $emailService;
     }
+
+    /**
+     * Verify JotForm webhook secret key.
+     * Returns 403 Response if invalid/missing, null if valid.
+     */
+    protected function verifyWebhookSecret(Request $request): ?\Illuminate\Http\JsonResponse
+    {
+        $expectedKey = config('services.jotform.webhook_key', env('JOTFORM_WEBHOOK_KEY', 'vqt_jotform_secret_2026'));
+        $providedKey = $request->query('key') ?? $request->input('key') ?? $request->header('X-Webhook-Key');
+
+        if (empty($providedKey) || !hash_equals((string) $expectedKey, (string) $providedKey)) {
+            Log::warning('JotForm Webhook: Unauthorized access attempt - missing or invalid secret key', [
+                'ip' => $request->ip(),
+                'path' => $request->path(),
+                'provided_key' => $providedKey ? '***' : null,
+            ]);
+
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Invalid or missing webhook key',
+            ], 403);
+        }
+
+        return null;
+    }
+
     /**
      * Handle agreement submission from JotForm
      * Webhook URL: https://form.jotform.com/231635798225060
      */
     public function handleAgreementSubmission(Request $request)
     {
+        if ($authResponse = $this->verifyWebhookSecret($request)) {
+            return $authResponse;
+        }
+
         try {
             // Log the incoming webhook for debugging
             Log::info('JotForm Agreement Webhook Received', [
@@ -100,9 +130,7 @@ class JotFormWebhookController extends Controller
                         'changes'      => ['source' => 'JotForm Agreement Webhook', 'ticked_at' => $now],
                     ]);
                     return response()->json([
-                        'message' => 'Trainee 4-way agreement processed',
-                        'trainee_id' => $trainee->id,
-                        'received' => true,
+                        'message' => 'Webhook received and processed',
                     ], 200);
                 }
 
@@ -113,8 +141,7 @@ class JotFormWebhookController extends Controller
                 ]);
                 
                 return response()->json([
-                    'message' => 'Client not found',
-                    'received' => true,
+                    'message' => 'Webhook received and processed',
                 ], 200); // Return 200 to prevent JotForm retries
             }
 
@@ -163,10 +190,7 @@ class JotFormWebhookController extends Controller
                 ]);
 
                 return response()->json([
-                    'message' => 'Agreement form received but signature not detected',
-                    'client_uuid' => $client->uuid,
-                    'signed' => false,
-                    'note' => 'Please ensure signature field is properly configured in JotForm',
+                    'message' => 'Webhook received and processed',
                 ], 200);
             }
 
@@ -224,11 +248,7 @@ class JotFormWebhookController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Agreement processed successfully',
-                'client_uuid' => $client->uuid,
-                'client_id' => $client->client_id,
-                'signed' => true,
-                'signature_detected' => true,
+                'message' => 'Webhook received and processed',
             ], 200);
 
         } catch (\Exception $e) {
@@ -239,10 +259,8 @@ class JotFormWebhookController extends Controller
             ]);
 
             // Return 200 to prevent JotForm from retrying excessively
-            // But log the error for investigation
             return response()->json([
-                'message' => 'Error processing agreement',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal error',
+                'message' => 'Webhook received and processed',
             ], 200);
         }
     }
@@ -938,6 +956,10 @@ class JotFormWebhookController extends Controller
      */
     public function handlePersonalTherapySubmission(Request $request): \Illuminate\Http\JsonResponse
     {
+        if ($authResponse = $this->verifyWebhookSecret($request)) {
+            return $authResponse;
+        }
+
         try {
             Log::info('JotForm Personal Therapy Webhook Received', [
                 'ip' => $request->ip(),
@@ -972,7 +994,7 @@ class JotFormWebhookController extends Controller
 
             if (!$email) {
                 Log::warning('Personal Therapy Webhook: Email not found in submission', ['data' => $data]);
-                return response()->json(['message' => 'Email not found in submission', 'received' => true], 200);
+                return response()->json(['message' => 'Webhook received and processed'], 200);
             }
 
             $email = strtolower(trim($email));
@@ -980,7 +1002,7 @@ class JotFormWebhookController extends Controller
 
             if (!$trainee) {
                 Log::warning('Personal Therapy Webhook: Trainee not found for email', ['email' => $email]);
-                return response()->json(['message' => 'Trainee not found for email', 'received' => true], 200);
+                return response()->json(['message' => 'Webhook received and processed'], 200);
             }
 
             $onboarding = is_array($trainee->onboarding_data) 
@@ -1023,16 +1045,14 @@ class JotFormWebhookController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Personal Therapy form status recorded',
-                'trainee_id' => $trainee->id,
-                'ticked' => true,
+                'message' => 'Webhook received and processed',
             ], 200);
         } catch (\Exception $e) {
             Log::error('Personal Therapy Webhook Error: ' . $e->getMessage(), [
                 'exception' => $e,
             ]);
 
-            return response()->json(['message' => 'Webhook processing error', 'received' => true], 200);
+            return response()->json(['message' => 'Webhook received and processed'], 200);
         }
     }
 }

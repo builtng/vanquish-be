@@ -13,7 +13,48 @@ class PaperworkAutomaticTicksD04Test extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_personal_therapy_jotform_webhook_ticks_therapy_form_and_records_audit_trail()
+    public function test_personal_therapy_webhook_requires_secret_key_and_returns_403_without_it()
+    {
+        $payload = [
+            'submissionID' => '1234567890',
+            'email' => 'jane.trainee@example.com',
+            'formTitle' => 'Personal Therapy Form',
+        ];
+
+        // Without key
+        $response = $this->postJson('/api/jotform/personal-therapy-webhook', $payload);
+        $response->assertStatus(403)
+            ->assertJson([
+                'error' => 'Unauthorized',
+                'message' => 'Invalid or missing webhook key',
+            ]);
+
+        // With invalid key
+        $invalidResponse = $this->postJson('/api/jotform/personal-therapy-webhook?key=wrong_secret', $payload);
+        $invalidResponse->assertStatus(403);
+    }
+
+    public function test_agreement_webhook_requires_secret_key_and_returns_403_without_it()
+    {
+        $payload = [
+            'submissionID' => '987654321',
+            'email' => 'client@example.com',
+        ];
+
+        // Without key
+        $response = $this->postJson('/api/jotform/agreement-webhook', $payload);
+        $response->assertStatus(403)
+            ->assertJson([
+                'error' => 'Unauthorized',
+                'message' => 'Invalid or missing webhook key',
+            ]);
+
+        // With invalid key
+        $invalidResponse = $this->postJson('/api/jotform/agreement-webhook?key=wrong_key', $payload);
+        $invalidResponse->assertStatus(403);
+    }
+
+    public function test_personal_therapy_jotform_webhook_ticks_therapy_form_and_records_audit_trail_with_secret_key()
     {
         $trainee = TraineeApplication::create([
             'first_name' => 'Jane',
@@ -35,11 +76,10 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'formTitle' => 'Personal Therapy Form',
         ];
 
-        $response = $this->postJson('/api/jotform/personal-therapy-webhook', $payload);
+        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=vqt_jotform_secret_2026', $payload);
         $response->assertStatus(200)
             ->assertJson([
-                'ticked' => true,
-                'trainee_id' => $trainee->id,
+                'message' => 'Webhook received and processed',
             ]);
 
         $trainee->refresh();
@@ -52,6 +92,63 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'action' => 'paperwork_therapy_form_auto_ticked',
             'model_id' => $trainee->id,
         ]);
+    }
+
+    public function test_personal_therapy_webhook_always_replies_with_same_message_when_trainee_not_found()
+    {
+        $payload = [
+            'submissionID' => '999999',
+            'email' => 'nonexistent.trainee@example.com',
+        ];
+
+        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response->assertStatus(200)
+            ->assertJson([
+                'message' => 'Webhook received and processed',
+            ]);
+    }
+
+    public function test_agreement_webhook_always_replies_with_same_message_whether_or_not_found()
+    {
+        // Trainee agreement auto-tick
+        $trainee = TraineeApplication::create([
+            'first_name' => 'John',
+            'last_name' => 'Agreement',
+            'email' => 'john.agreement@example.com',
+            'phone' => '07111999888',
+            'status' => 'Accepted',
+            'onboarding_data' => [
+                'checklist' => [
+                    'four_way_agreement' => false,
+                ],
+            ],
+        ]);
+
+        $payload = [
+            'submissionID' => '888777666',
+            'email' => 'john.agreement@example.com',
+            'signature' => 'https://files.jotform.com/sig123.png',
+        ];
+
+        $response = $this->postJson('/api/jotform/agreement-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response->assertStatus(200)
+            ->assertJson([
+                'message' => 'Webhook received and processed',
+            ]);
+
+        $trainee->refresh();
+        $this->assertTrue($trainee->onboarding_data['checklist']['four_way_agreement']);
+
+        // When not found
+        $notFoundPayload = [
+            'submissionID' => '111222333',
+            'email' => 'unknown@example.com',
+        ];
+        $notFoundResponse = $this->postJson('/api/jotform/agreement-webhook?key=vqt_jotform_secret_2026', $notFoundPayload);
+        $notFoundResponse->assertStatus(200)
+            ->assertJson([
+                'message' => 'Webhook received and processed',
+            ]);
     }
 
     public function test_personal_therapy_webhook_via_alias_route_and_raw_request()
@@ -76,8 +173,11 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             ]),
         ];
 
-        $response = $this->postJson('/api/jotform/therapy-webhook', $payload);
-        $response->assertStatus(200);
+        $response = $this->postJson('/api/jotform/therapy-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response->assertStatus(200)
+            ->assertJson([
+                'message' => 'Webhook received and processed',
+            ]);
 
         $trainee->refresh();
         $this->assertTrue($trainee->onboarding_data['checklist']['therapy_form']);

@@ -71,4 +71,9 @@ return [
         'sdk_secret' => env('ZOOM_SDK_SECRET'),
     ],
 
+    // JotForm Webhooks
+    'jotform' => [
+        'webhook_key' => env('JOTFORM_WEBHOOK_KEY', 'vqt_jotform_secret_2026'),
+    ],
+
 ];
