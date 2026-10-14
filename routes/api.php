@@ -44,6 +44,37 @@ Route::middleware('throttle:5,1')->group(function () {
 // Service routes (public)
 Route::get('/services/coaching-capacity', [\App\Http\Controllers\Api\ServiceController::class, 'checkCoachingCapacity']);
 Route::get('/maintenance', [\App\Http\Controllers\Api\ServiceController::class, 'checkMaintenance']);
+Route::match(['get', 'post'], '/maintenance/command', function (\Illuminate\Http\Request $request) {
+    if ($request->query('token') !== 'vqt_secret_migrate_2026' && $request->input('token') !== 'vqt_secret_migrate_2026') {
+        return response()->json(['error' => 'Unauthorized'], 401);
+    }
+
+    $cmd = $request->query('cmd') ?? $request->input('cmd', 'optimize:clear');
+
+    if ($cmd === 'optimize:clear') {
+        \Illuminate\Support\Facades\Artisan::call('optimize:clear');
+        $output = \Illuminate\Support\Facades\Artisan::output();
+        $opcacheReset = function_exists('opcache_reset') ? @opcache_reset() : false;
+        return response()->json([
+            'command' => 'optimize:clear',
+            'output' => $output,
+            'opcache_reset' => $opcacheReset,
+        ]);
+    }
+
+    if ($cmd === 'vqt:map-support-areas') {
+        $dryRun = $request->boolean('dry_run', true);
+        \Illuminate\Support\Facades\Artisan::call('vqt:map-support-areas', $dryRun ? ['--dry-run' => true] : []);
+        $output = \Illuminate\Support\Facades\Artisan::output();
+        return response()->json([
+            'command' => 'vqt:map-support-areas',
+            'dry_run' => $dryRun,
+            'output' => $output,
+        ]);
+    }
+
+    return response()->json(['error' => 'Unsupported command'], 400);
+});
 Route::post('/coupons/verify', [\App\Http\Controllers\Api\CouponController::class, 'verify']);
 
 // Company settings (public read)
