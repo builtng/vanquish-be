@@ -593,18 +593,131 @@ class TraineeApplicationController extends Controller
             : ['checklist' => []];
 
         $onboarding['checklist'][$validated['document_key']] = $validated['status'];
+        $user = $request->user();
+        $userName = $user ? ($user->name ?? "User #{$user->id}") : 'Admin';
+        $now = now()->toIso8601String();
+
+        if (!isset($onboarding['checklist_meta'])) {
+            $onboarding['checklist_meta'] = [];
+        }
+
+        $onboarding['checklist_meta'][$validated['document_key']] = [
+            'status'    => $validated['status'],
+            'ticked_by' => "Admin {$userName} (Manual)",
+            'ticked_at' => $now,
+            'source'    => 'manual_admin',
+        ];
+
         $onboarding['history'][] = [
-            'action' => "paperwork_{$validated['document_key']}_updated",
-            'status' => $validated['status'],
-            'at'     => now()->toIso8601String(),
-            'by'     => $request->user()->id,
+            'action'  => "paperwork_{$validated['document_key']}_updated",
+            'status'  => $validated['status'],
+            'at'      => $now,
+            'by'      => $user ? $user->id : null,
+            'by_name' => $userName,
+            'source'  => 'manual_admin',
         ];
 
         $traineeApplication->update(['onboarding_data' => $onboarding]);
 
+        ActivityLog::create([
+            'model_type'   => TraineeApplication::class,
+            'model_id'     => $traineeApplication->id,
+            'action'       => "paperwork_{$validated['document_key']}_updated",
+            'description'  => "Paperwork {$validated['document_key']} manually set to " . ($validated['status'] ? 'completed' : 'pending') . " by {$userName} for {$traineeApplication->first_name} {$traineeApplication->last_name}",
+            'changes'      => [
+                'document_key' => $validated['document_key'],
+                'status'       => $validated['status'],
+                'ticked_by'    => "Admin {$userName} (Manual)",
+                'ticked_at'    => $now,
+                'source'       => 'manual_admin',
+            ],
+            'user_id'      => $user ? $user->id : null,
+        ]);
+
         return response()->json([
             'message' => 'Paperwork status updated',
             'application' => $traineeApplication->fresh()
+        ]);
+    }
+
+    /**
+     * Upload signed 4-way agreement document and automatically tick four_way_agreement.
+     */
+    public function uploadAgreement(Request $request, TraineeApplication $traineeApplication)
+    {
+        $request->validate([
+            'file' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:20480',
+            'agreement' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:20480',
+        ]);
+
+        $file = $request->file('file') ?? $request->file('agreement');
+        if (!$file) {
+            return response()->json(['message' => 'No file provided for upload.'], 422);
+        }
+
+        $path = $file->store("trainee_agreements/{$traineeApplication->id}", 'private');
+        $originalName = $file->getClientOriginalName();
+        $now = now()->toIso8601String();
+        $user = $request->user();
+        $userName = $user ? ($user->name ?? "User #{$user->id}") : 'Admin';
+
+        $onboarding = is_array($traineeApplication->onboarding_data) 
+            ? $traineeApplication->onboarding_data 
+            : ['checklist' => []];
+
+        $onboarding['checklist']['four_way_agreement'] = true;
+
+        if (!isset($onboarding['documents'])) {
+            $onboarding['documents'] = [];
+        }
+        $onboarding['documents']['four_way_agreement'] = [
+            'path'        => $path,
+            'filename'    => $originalName,
+            'uploaded_at' => $now,
+            'uploaded_by' => $userName,
+        ];
+
+        if (!isset($onboarding['checklist_meta'])) {
+            $onboarding['checklist_meta'] = [];
+        }
+        $onboarding['checklist_meta']['four_way_agreement'] = [
+            'status'    => true,
+            'ticked_by' => "Upload by {$userName}",
+            'ticked_at' => $now,
+            'source'    => "Signed 4-Way Agreement Upload ({$originalName})",
+            'filename'  => $originalName,
+            'path'      => $path,
+        ];
+
+        $onboarding['history'][] = [
+            'action'   => 'four_way_agreement_uploaded',
+            'status'   => true,
+            'at'       => $now,
+            'by'       => $user ? $user->id : null,
+            'by_name'  => $userName,
+            'source'   => "Signed 4-Way Agreement Upload ({$originalName})",
+            'filename' => $originalName,
+        ];
+
+        $traineeApplication->update(['onboarding_data' => $onboarding]);
+
+        ActivityLog::create([
+            'model_type'   => TraineeApplication::class,
+            'model_id'     => $traineeApplication->id,
+            'action'       => 'four_way_agreement_uploaded',
+            'description'  => "Signed 4-way agreement uploaded ({$originalName}) for {$traineeApplication->first_name} {$traineeApplication->last_name}",
+            'changes'      => [
+                'filename'  => $originalName,
+                'path'      => $path,
+                'ticked_at' => $now,
+                'source'    => "Signed 4-Way Agreement Upload ({$originalName})",
+            ],
+            'user_id'      => $user ? $user->id : null,
+        ]);
+
+        return response()->json([
+            'message' => 'Signed 4-way agreement uploaded successfully',
+            'application' => $traineeApplication->fresh(),
         ]);
     }
 
@@ -1008,6 +1121,18 @@ class TraineeApplicationController extends Controller
 
         if (!$application) {
             return response()->json(['message' => 'Application not found'], 404);
+        }
+
+        if ($field === 'four_way_agreement' || $field === 'agreement') {
+            $doc = $application->onboarding_data['documents']['four_way_agreement'] ?? null;
+            if (!$doc || empty($doc['path'])) {
+                return response()->json(['message' => 'Signed 4-way agreement document not found'], 404);
+            }
+            $disk = Storage::disk('private')->exists($doc['path']) ? 'private' : (Storage::disk('local')->exists($doc['path']) ? 'local' : null);
+            if (!$disk) {
+                return response()->json(['message' => 'File not found on storage'], 404);
+            }
+            return Storage::disk($disk)->download($doc['path'], $doc['filename'] ?? 'signed_4_way_agreement.pdf');
         }
 
         $fieldMap = [

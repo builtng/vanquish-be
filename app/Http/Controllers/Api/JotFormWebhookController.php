@@ -68,6 +68,44 @@ class JotFormWebhookController extends Controller
             }
 
             if (!$client) {
+                // Check if this agreement submission belongs to a TraineeApplication
+                $trainee = $clientEmail ? TraineeApplication::whereRaw('LOWER(email) = ?', [$clientEmail])->first() : null;
+                if ($trainee) {
+                    $signatureUrl = $this->extractSignatureField($data);
+                    $onboarding = is_array($trainee->onboarding_data) ? $trainee->onboarding_data : ['checklist' => []];
+                    $onboarding['checklist']['four_way_agreement'] = true;
+                    $submissionId = $data['submissionID'] ?? $data['submission_id'] ?? null;
+                    $now = now()->toIso8601String();
+                    $onboarding['checklist_meta']['four_way_agreement'] = [
+                        'status' => true,
+                        'ticked_by' => 'JotForm Agreement Webhook',
+                        'ticked_at' => $now,
+                        'source' => 'JotForm Agreement Webhook',
+                        'submission_id' => $submissionId,
+                        'signature_url' => $signatureUrl,
+                    ];
+                    $onboarding['history'][] = [
+                        'action' => 'paperwork_four_way_agreement_auto_ticked',
+                        'status' => true,
+                        'at' => $now,
+                        'source' => 'JotForm Agreement Webhook',
+                        'submission_id' => $submissionId,
+                    ];
+                    $trainee->update(['onboarding_data' => $onboarding]);
+                    ActivityLog::create([
+                        'model_type'   => TraineeApplication::class,
+                        'model_id'     => $trainee->id,
+                        'action'       => 'four_way_agreement_ticked',
+                        'description'  => "4-way agreement automatically ticked via JotForm webhook for {$trainee->first_name} {$trainee->last_name}",
+                        'changes'      => ['source' => 'JotForm Agreement Webhook', 'ticked_at' => $now],
+                    ]);
+                    return response()->json([
+                        'message' => 'Trainee 4-way agreement processed',
+                        'trainee_id' => $trainee->id,
+                        'received' => true,
+                    ], 200);
+                }
+
                 Log::warning('JotForm Agreement: Client not found', [
                     'email' => $clientEmail,
                     'identifier' => $clientIdentifier,
@@ -893,4 +931,109 @@ class JotFormWebhookController extends Controller
 
         return null;
     }
+
+    /**
+     * Handle Personal Therapy form submission from JotForm
+     * Automatically ticks therapy_form on the matching TraineeApplication
+     */
+    public function handlePersonalTherapySubmission(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            Log::info('JotForm Personal Therapy Webhook Received', [
+                'ip' => $request->ip(),
+                'payload' => $request->all(),
+            ]);
+
+            $data = $request->all();
+
+            // Support rawRequest if JotForm sends json in rawRequest
+            if (isset($data['rawRequest']) && is_string($data['rawRequest'])) {
+                $decoded = json_decode($data['rawRequest'], true);
+                if (is_array($decoded)) {
+                    $data = array_merge($decoded, $data);
+                }
+            }
+
+            // Extract email
+            $email = $this->extractFieldValue($data, [
+                'email', 'q3_email', 'q4_email', 'q5_email', 'q6_email',
+                'q3_emailAddress', 'q4_emailAddress', 'email_address',
+                'trainee_email', 'counsellor_email'
+            ]);
+
+            if (!$email) {
+                foreach ($data as $val) {
+                    if (is_string($val) && filter_var(trim($val), FILTER_VALIDATE_EMAIL)) {
+                        $email = trim($val);
+                        break;
+                    }
+                }
+            }
+
+            if (!$email) {
+                Log::warning('Personal Therapy Webhook: Email not found in submission', ['data' => $data]);
+                return response()->json(['message' => 'Email not found in submission', 'received' => true], 200);
+            }
+
+            $email = strtolower(trim($email));
+            $trainee = TraineeApplication::whereRaw('LOWER(email) = ?', [$email])->first();
+
+            if (!$trainee) {
+                Log::warning('Personal Therapy Webhook: Trainee not found for email', ['email' => $email]);
+                return response()->json(['message' => 'Trainee not found for email', 'received' => true], 200);
+            }
+
+            $onboarding = is_array($trainee->onboarding_data) 
+                ? $trainee->onboarding_data 
+                : ['checklist' => []];
+
+            $onboarding['checklist']['therapy_form'] = true;
+
+            $submissionId = $data['submissionID'] ?? $data['submission_id'] ?? null;
+            $now = now()->toIso8601String();
+
+            $onboarding['checklist_meta']['therapy_form'] = [
+                'status' => true,
+                'ticked_by' => 'Personal Therapy JotForm Webhook',
+                'ticked_at' => $now,
+                'source' => 'Personal Therapy JotForm Webhook',
+                'submission_id' => $submissionId,
+            ];
+
+            $onboarding['history'][] = [
+                'action' => 'paperwork_therapy_form_auto_ticked',
+                'status' => true,
+                'at' => $now,
+                'source' => 'Personal Therapy JotForm Webhook',
+                'submission_id' => $submissionId,
+            ];
+
+            $trainee->update(['onboarding_data' => $onboarding]);
+
+            ActivityLog::create([
+                'model_type'   => TraineeApplication::class,
+                'model_id'     => $trainee->id,
+                'action'       => 'paperwork_therapy_form_auto_ticked',
+                'description'  => "Personal Therapy form automatically ticked via JotForm webhook for {$trainee->first_name} {$trainee->last_name}",
+                'changes'      => [
+                    'source' => 'Personal Therapy JotForm Webhook',
+                    'submission_id' => $submissionId,
+                    'ticked_at' => $now,
+                ],
+            ]);
+
+            return response()->json([
+                'message' => 'Personal Therapy form status recorded',
+                'trainee_id' => $trainee->id,
+                'ticked' => true,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Personal Therapy Webhook Error: ' . $e->getMessage(), [
+                'exception' => $e,
+            ]);
+
+            return response()->json(['message' => 'Webhook processing error', 'received' => true], 200);
+        }
+    }
 }
+

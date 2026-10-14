@@ -84,6 +84,8 @@ Route::post('/payments/webhook', [PaymentController::class, 'handleWebhook'])->w
 Route::post('/jotform/agreement-webhook', [JotFormWebhookController::class, 'handleAgreementSubmission'])->withoutMiddleware(['throttle:api']);
 Route::post('/jotform/intake-webhook', [JotFormWebhookController::class, 'handleIntakeSubmission'])->withoutMiddleware(['throttle:api']);
 Route::post('/jotform/webhook/trainee', [JotFormWebhookController::class, 'handleTraineeSubmission'])->withoutMiddleware(['throttle:api']);
+Route::post('/jotform/personal-therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->withoutMiddleware(['throttle:api']);
+Route::post('/jotform/therapy-webhook', [JotFormWebhookController::class, 'handlePersonalTherapySubmission'])->withoutMiddleware(['throttle:api']);
 
 // HireVire webhook (Stage 2 video completion)
 Route::post('/hirevire/webhook', [HireVireWebhookController::class, 'handleSubmission'])->withoutMiddleware(['throttle:api']);
@@ -343,6 +345,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/trainee-applications/{trainee_application}/decision', [TraineeApplicationController::class, 'makeDecision']);
         // Stage 4 Onboarding
         Route::post('/trainee-applications/{trainee_application}/paperwork', [TraineeApplicationController::class, 'updatePaperwork']);
+        Route::post('/trainee-applications/{trainee_application}/upload-agreement', [TraineeApplicationController::class, 'uploadAgreement']);
         Route::post('/trainee-applications/{trainee_application}/induction-attendance', [TraineeApplicationController::class, 'recordInductionAttendance']);
         Route::post('/trainee-applications/{trainee_application}/portal-invite', [TraineeApplicationController::class, 'sendPortalInvite']);
         Route::post('/trainee-applications/{trainee_application}/finalize', [TraineeApplicationController::class, 'finalizePlacement']);
