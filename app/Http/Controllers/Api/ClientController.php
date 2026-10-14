@@ -699,7 +699,7 @@ class ClientController extends Controller
 
         $clientService = strtolower(trim((string) ($clientData['service_type'] ?? '')));
         $isLowCost = in_array($clientService, ['low cost', 'low-cost']);
-        $isQualified = in_array($clientService, ['mid range', 'mid-range', 'coaching', 'high range', 'high-range']);
+        $isQualified = in_array($clientService, ['mid range', 'mid-range', 'coaching', 'counselling & coaching', 'counselling and coaching', 'high range', 'high-range']);
 
         $counsellorsQuery = TrainingCounsellor::whereNull('archived_at')
             ->where('status', 'Active');
