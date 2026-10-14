@@ -453,18 +453,23 @@ class IntakeFormController extends Controller
                 // PSG
                 'psg_day_preference' => 'nullable|string|max:100',
                 'psg_reason' => 'nullable|string',
-            // Document validations
-            'fitnessTopractice' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
-            'qualifications' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
-            'dbs' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
-            'cv' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-            'validId' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
-            'insurance' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
+            // Document validations - supports uploaded files OR pre-uploaded document URL strings
+            'fitnessTopractice' => $request->hasFile('fitnessTopractice') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
+            'qualifications' => $request->hasFile('qualifications') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
+            'dbs' => $request->hasFile('dbs') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
+            'cv' => $request->hasFile('cv') ? 'file|mimes:pdf,doc,docx|max:10240' : 'nullable|string|max:1000',
+            'validId' => $request->hasFile('validId') ? 'file|mimes:pdf,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
+            'insurance' => $request->hasFile('insurance') ? 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240' : 'nullable|string|max:1000',
             'create_tc' => 'nullable|boolean',
         ], [
             'validId.file' => 'Please upload a valid ID document',
             'validId.mimes' => 'Please upload a valid ID document (PDF, JPG, or PNG)',
-            'validId.max' => 'The ID document must not exceed 10MB',
+            'validId.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'fitnessTopractice.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'qualifications.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'dbs.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'cv.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+            'insurance.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
         ], [
             'validId' => 'Valid ID',
             'fitnessTopractice' => 'Fitness to Practise',
@@ -551,6 +556,8 @@ class IntakeFormController extends Controller
                     $path = $file->storeAs("tc_intake_forms/documents/{$dbField}", $filename, 'public');
                     // Store full URL or path depending on app config
                     $formData[$dbField] = config('app.url') . '/storage/' . $path;
+                } elseif ($request->filled($requestField) && is_string($request->input($requestField))) {
+                    $formData[$dbField] = $request->input($requestField);
                 }
             }
 
@@ -779,5 +786,64 @@ class IntakeFormController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    public function uploadDocument(Request $request)
+    {
+        try {
+            $request->validate([
+                'file' => 'required|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
+                'field' => 'required|string|max:100',
+            ], [
+                'file.max' => 'This file is larger than 10 MB. Please upload a smaller file.',
+                'file.mimes' => 'Invalid file type. Allowed types: PDF, DOC, DOCX, JPG, JPEG, PNG',
+                'file.required' => 'Please select a file to upload.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        $file = $request->file('file');
+        $field = preg_replace('/[^a-zA-Z0-9_-]/', '_', $request->input('field'));
+        $originalName = $file->getClientOriginalName();
+        $sanitizedName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName);
+        $filename = time() . '_' . uniqid() . '_' . $sanitizedName;
+
+        $path = $file->storeAs("tc_intake_forms/documents/{$field}", $filename, 'public');
+        $url = config('app.url') . '/storage/' . $path;
+
+        // Optionally associate with trainee application if id passed
+        $appId = $request->input('trainee_application_id') ?? $request->input('application_id');
+        if (!empty($appId)) {
+            $app = is_numeric($appId) ? TraineeApplication::find($appId) : TraineeApplication::where('uuid', $appId)->first();
+            if ($app) {
+                $docColMap = [
+                    'fitnessTopractice' => 'doc_fitness_to_practise',
+                    'fitness_to_practice' => 'doc_fitness_to_practise',
+                    'qualifications' => 'doc_prior_qualifications',
+                    'dbs' => 'doc_dbs_certificate',
+                    'dbs_certificate' => 'doc_dbs_certificate',
+                    'cv' => 'doc_cv',
+                    'validId' => 'doc_valid_id',
+                    'valid_id' => 'doc_valid_id',
+                    'insurance' => 'doc_indemnity_insurance',
+                    'insurance_certificate' => 'doc_indemnity_insurance',
+                ];
+                if (isset($docColMap[$field])) {
+                    $app->update([$docColMap[$field] => $url]);
+                }
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Document uploaded successfully',
+            'file_path' => $path,
+            'url' => $url,
+            'original_name' => $originalName,
+        ]);
     }
 }

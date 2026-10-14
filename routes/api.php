@@ -102,6 +102,7 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/intake/confirm-payment', [IntakeController::class, 'handlePaymentSuccess']);
     Route::get('/intake/success', [IntakeController::class, 'success'])->name('intake.success');
     Route::post('/tc-intake', [IntakeFormController::class, 'tcIntake']);
+    Route::post('/tc-intake/upload-document', [IntakeFormController::class, 'uploadDocument'])->middleware('throttle:60,1');
     Route::get('/client-agreement/prefill/{uuid}', [ClientAgreementController::class, 'getAgreementData']);
     Route::post('/client-agreement/submit', [ClientAgreementController::class, 'submitAgreement']);
     Route::get('/client-agreement/download/{uuid}', [ClientAgreementController::class, 'downloadAgreementPdf']);
