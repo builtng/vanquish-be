@@ -9,6 +9,7 @@ use App\Mail\DynamicEmail;
 use App\Models\User;
 use App\Models\Person;
 use App\Models\QcApplication;
+use App\Models\TraineeApplication;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Mail;
@@ -302,7 +303,128 @@ class TrainingCounsellorController extends Controller
             'counsellor_profiles' => $relatedTcs,
         ]);
 
+        $app = $tc->counsellor_type === 'Qualified'
+            ? ($qcApps->first() ?? $traineeApps->first())
+            : ($traineeApps->first() ?? $qcApps->first());
+
+        $journey = $this->buildJourney($tc, $app);
+        $tc->setAttribute('journey', $journey);
+
         return response()->json($tc);
+    }
+
+    /**
+     * Build real journey stages from server pipeline data.
+     * Stages: Application Received, Interview Invited & Attended, Accepted, Induction Attended, Active.
+     */
+    protected function buildJourney(TrainingCounsellor $tc, $app = null): array
+    {
+        // 1. Application Received
+        $appReceivedDate = $app?->created_at?->toIso8601String() 
+            ?? $app?->jotform_submitted_at?->toIso8601String() 
+            ?? $tc->created_at?->toIso8601String();
+        $appReceivedCompleted = true;
+
+        // 2. Interview Invited and Attended
+        $interviewAttended = false;
+        $interviewDate = null;
+        if ($app) {
+            $interviewData = is_array($app->interview_data) ? $app->interview_data : [];
+            $attendance = $interviewData['attendance'] ?? [];
+            if (!empty($attendance['attended'])) {
+                $interviewAttended = true;
+                $interviewDate = $attendance['attended_at'] ?? $app->interview_scheduled_at ?? null;
+            } elseif (in_array($app->status, ['Interview Attended', 'Accepted', 'Induction Attended', 'Onboarding', 'Active'])) {
+                $interviewAttended = true;
+                $interviewDate = $app->interview_scheduled_at ?? ($app->updated_at ? $app->updated_at->toIso8601String() : null);
+            }
+        }
+        if (!$interviewAttended && in_array($tc->status, ['Active', 'At Capacity', 'On Leave'])) {
+            $interviewAttended = true;
+            $interviewDate = $tc->created_at ? $tc->created_at->toIso8601String() : null;
+        }
+
+        // 3. Accepted
+        $accepted = false;
+        $acceptedDate = null;
+        if ($app) {
+            $interviewData = is_array($app->interview_data) ? $app->interview_data : [];
+            $decision = $interviewData['decision'] ?? [];
+            if (($decision['outcome'] ?? null) === 'Accepted' || in_array($app->status, ['Accepted', 'Induction Attended', 'Onboarding', 'Active'])) {
+                $accepted = true;
+                $acceptedDate = $decision['decided_at'] ?? ($app->updated_at ? $app->updated_at->toIso8601String() : null);
+            }
+        }
+        if (!$accepted && in_array($tc->status, ['Active', 'At Capacity', 'On Leave'])) {
+            $accepted = true;
+            $acceptedDate = $tc->created_at ? $tc->created_at->toIso8601String() : null;
+        }
+
+        // 4. Induction Attended
+        $inductionAttended = false;
+        $inductionDate = null;
+        if ($app) {
+            $onboarding = is_array($app->onboarding_data) ? $app->onboarding_data : [];
+            $checklist = $onboarding['checklist'] ?? [];
+            if (!empty($checklist['induction_attended']) || $app->status === 'Induction Attended' || in_array($app->status, ['Onboarding', 'Active'])) {
+                $inductionAttended = true;
+                $inductionDate = $onboarding['induction_date'] ?? $app->induction_date ?? null;
+            }
+        }
+        if (!$inductionAttended && in_array($tc->status, ['Active', 'At Capacity', 'On Leave'])) {
+            $inductionAttended = true;
+            $inductionDate = $tc->created_at ? $tc->created_at->toIso8601String() : null;
+        }
+
+        // 5. Active
+        $isActive = in_array($tc->status, ['Active', 'At Capacity', 'On Leave']) || ($app?->status === 'Active');
+        $activeDate = $isActive ? ($tc->created_at ? $tc->created_at->toIso8601String() : null) : null;
+
+        $stages = [
+            [
+                'stage'     => 'Application Received',
+                'name'      => 'Application Received',
+                'date'      => $appReceivedDate,
+                'completed' => $appReceivedCompleted,
+            ],
+            [
+                'stage'     => 'Interview Invited and Attended',
+                'name'      => 'Interview Invited and Attended',
+                'date'      => $interviewDate,
+                'completed' => $interviewAttended,
+            ],
+            [
+                'stage'     => 'Accepted',
+                'name'      => 'Accepted',
+                'date'      => $acceptedDate,
+                'completed' => $accepted,
+            ],
+            [
+                'stage'     => 'Induction Attended',
+                'name'      => 'Induction Attended',
+                'date'      => $inductionDate,
+                'completed' => $inductionAttended,
+            ],
+            [
+                'stage'     => 'Active',
+                'name'      => 'Active',
+                'date'      => $activeDate,
+                'completed' => $isActive,
+            ],
+        ];
+
+        $lastCompletedIndex = -1;
+        foreach ($stages as $idx => $s) {
+            if ($s['completed']) {
+                $lastCompletedIndex = $idx;
+            }
+        }
+
+        foreach ($stages as $idx => &$s) {
+            $s['current'] = ($idx === $lastCompletedIndex);
+        }
+
+        return $stages;
     }
 
     public function update(Request $request, $id)
