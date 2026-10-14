@@ -378,6 +378,10 @@ class ClientBookingController extends Controller
             return response()->json(['message' => 'Client not matched with a counsellor yet'], 400);
         }
 
+        if ($client->service_type === 'Low Cost') {
+            return response()->json(['message' => 'Low Cost sessions must be booked in blocks of 4.'], 422);
+        }
+
         // Check for double booking
         $isBooked = Session::where('tc_id', $client->matched_tc_id)
             ->where('scheduled_at', $validated['scheduled_at'])
@@ -480,6 +484,47 @@ class ClientBookingController extends Controller
                 return response()->json([
                     'message' => 'Your regular weekly session time has not been assigned by our admin team yet. Please contact support.',
                 ], 422);
+            }
+
+            $expectedDay = strtolower(trim($client->allocated_day));
+            $expectedTime = $this->formatTimeToHHi($client->allocated_time);
+
+            // Refuse if client attempts to choose a different time slot
+            if (!empty($validated['time_slot'])) {
+                $requestedTime = $this->formatTimeToHHi($validated['time_slot']);
+                if ($requestedTime !== $expectedTime) {
+                    return response()->json([
+                        'message' => 'Low Cost session times are set by Vanquish. You cannot choose a different session time.',
+                    ], 422);
+                }
+            }
+
+            // Refuse if client attempts to choose a different start date/day
+            if (!empty($validated['start_date'])) {
+                $startCarbon = Carbon::parse($validated['start_date']);
+                if (strtolower($startCarbon->format('l')) !== $expectedDay) {
+                    return response()->json([
+                        'message' => 'Low Cost session times are set by Vanquish. You cannot choose a different session time.',
+                    ], 422);
+                }
+                $startTime = $startCarbon->format('H:i');
+                if (strlen($validated['start_date']) > 10 && $startTime !== '00:00' && $startTime !== $expectedTime) {
+                    return response()->json([
+                        'message' => 'Low Cost session times are set by Vanquish. You cannot choose a different session time.',
+                    ], 422);
+                }
+            }
+
+            // Refuse if client attempts to pass custom session slots for any other day or time
+            if (!empty($validated['session_slots'])) {
+                foreach ($validated['session_slots'] as $slot) {
+                    $slotCarbon = Carbon::parse($slot);
+                    if (strtolower($slotCarbon->format('l')) !== $expectedDay || $slotCarbon->format('H:i') !== $expectedTime) {
+                        return response()->json([
+                            'message' => 'Low Cost session times are set by Vanquish. You cannot choose a different session time.',
+                        ], 422);
+                    }
+                }
             }
 
             // Auto mode: generate the next valid dates (holiday + double-booking aware)

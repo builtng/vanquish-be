@@ -894,6 +894,35 @@ class ClientController extends Controller
             return response()->json(['message' => 'Mid-Range and Coaching clients must be matched with a Qualified Counsellor.'], 422);
         }
 
+        // For Low Cost clients with an assigned session time, ensure the slot is in both availability schedules
+        if ($client->service_type === 'Low Cost' && !empty($validated['allocated_day']) && !empty($validated['allocated_time'])) {
+            $clientAvail = $client->availability ?? [];
+            if (is_string($clientAvail)) {
+                $clientAvail = json_decode($clientAvail, true) ?: [];
+            }
+            $tcAvail = $tc->availability ?? [];
+            if (is_string($tcAvail)) {
+                $tcAvail = json_decode($tcAvail, true) ?: [];
+            }
+
+            if (!empty($clientAvail) && !empty($tcAvail)) {
+                $dayKey = strtolower(trim($validated['allocated_day']));
+                $timeSlot = trim($validated['allocated_time']);
+
+                $clientDaySlots = array_map('strtolower', (array) ($clientAvail[$dayKey] ?? []));
+                $tcDaySlots = array_map('strtolower', (array) ($tcAvail[$dayKey] ?? []));
+
+                $clientHas = $this->slotMatchesAvailability($timeSlot, $clientDaySlots);
+                $tcHas = $this->slotMatchesAvailability($timeSlot, $tcDaySlots);
+
+                if (!$clientHas || !$tcHas) {
+                    return response()->json([
+                        'message' => 'Assigned session time must be within both the client\'s and the counsellor\'s availability.',
+                    ], 422);
+                }
+            }
+        }
+
 
         // Check if match already exists
         $existingMatch = ClientTcMatch::where('client_id', $client->id)
@@ -1590,5 +1619,36 @@ class ClientController extends Controller
         // For clients, I will use "CLIENT_CHARLES_REPORT.pdf" to differentiate.
         $sanitizedName = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '_', $client->name));
         return $pdf->download("CLIENT_{$sanitizedName}_REPORT.pdf");
+    }
+
+    private function slotMatchesAvailability(string $targetSlot, array $daySlots): bool
+    {
+        $targetClean = strtolower(str_replace(' ', '', $targetSlot));
+
+        // Mapping for abstract slots
+        $abstractExpansions = [
+            'morning-early' => ['10am-1050am'],
+            'morning-late' => ['11am-1150am', '12pm-1250pm'],
+            'afternoon-early' => ['1pm-150pm', '2pm-250pm', '3pm-350pm'],
+            'afternoon-late' => ['4pm-450pm'],
+            'evening' => ['5pm-550pm', '6pm-650pm'],
+            'morning' => ['10am-1050am', '11am-1150am'],
+            'afternoon' => ['12pm-1250pm', '1pm-150pm', '2pm-250pm', '3pm-350pm', '4pm-450pm'],
+        ];
+
+        foreach ($daySlots as $slot) {
+            $slotClean = strtolower(str_replace(' ', '', (string) $slot));
+            if ($slotClean === $targetClean) {
+                return true;
+            }
+            if (isset($abstractExpansions[$slotClean]) && in_array($targetClean, $abstractExpansions[$slotClean], true)) {
+                return true;
+            }
+            if (isset($abstractExpansions[$targetClean]) && in_array($slotClean, $abstractExpansions[$targetClean], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

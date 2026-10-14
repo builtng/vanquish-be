@@ -175,16 +175,10 @@ class LowCostPricingAndBookingRulesTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(201);
-        $data = $response->json();
-
-        // Must still be allocated on Monday at 10:00, completely ignoring user submitted manual slots
-        $sessions = Session::whereIn('id', $data['session_ids'])->get();
-        foreach ($sessions as $session) {
-            $carbon = Carbon::parse($session->scheduled_at);
-            $this->assertEquals('Monday', $carbon->format('l'));
-            $this->assertEquals('10:00', $carbon->format('H:i'));
-        }
+        $response->assertStatus(422);
+        $response->assertJsonFragment([
+            'message' => 'Low Cost session times are set by Vanquish. You cannot choose a different session time.',
+        ]);
     }
 
     public function test_48_hour_deadline_penalty_reduces_block_to_3_sessions()
