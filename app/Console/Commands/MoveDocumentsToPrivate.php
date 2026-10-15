@@ -17,7 +17,7 @@ class MoveDocumentsToPrivate extends Command
      *
      * @var string
      */
-    protected $signature = 'documents:move-to-private {--copy : Copy files to private disk instead of moving} {--dry-run : Report files without actually copying or moving}';
+    protected $signature = 'documents:move-to-private {--copy : Copy files to private disk instead of moving} {--dry-run : Report files without actually copying or moving} {--summary-only : Output counts, tables/columns and folders only, omitting individual file paths}';
 
     /**
      * The console command description.
@@ -33,16 +33,50 @@ class MoveDocumentsToPrivate extends Command
     {
         $isCopy = $this->option('copy');
         $isDryRun = $this->option('dry-run');
+        $isSummaryOnly = $this->option('summary-only');
 
         $this->info(($isDryRun ? '[DRY RUN] ' : '') . ($isCopy ? 'Copying' : 'Moving') . ' documents to private disk...');
 
         $filesToProcess = collect();
+        $sourceTracker = []; // $normalizedPath => ['sources' => []]
+
+        // Helper to normalize and add
+        $registerFile = function ($rawPath, $sourceLabel) use (&$filesToProcess, &$sourceTracker) {
+            if (!$rawPath) return;
+            $p = $rawPath;
+            if (filter_var($p, FILTER_VALIDATE_URL)) {
+                $parsed = parse_url($p);
+                $urlPath = $parsed['path'] ?? '';
+                if (str_contains($urlPath, '/storage/')) {
+                    $p = substr($urlPath, strpos($urlPath, '/storage/') + 9);
+                } else {
+                    return;
+                }
+            }
+            $p = ltrim($p, '/');
+            if (str_starts_with($p, 'storage/')) {
+                $p = substr($p, 8);
+            }
+            // Skip photos/logos
+            if (str_starts_with($p, 'tc_photos/') || str_starts_with($p, 'client_photos/') || str_starts_with($p, 'company/')) {
+                return;
+            }
+            if (Storage::disk('public')->exists($p)) {
+                $filesToProcess->push($p);
+                if (!isset($sourceTracker[$p])) {
+                    $sourceTracker[$p] = [];
+                }
+                if (!in_array($sourceLabel, $sourceTracker[$p])) {
+                    $sourceTracker[$p][] = $sourceLabel;
+                }
+            }
+        };
 
         // 1. Files in tc_intake_forms/documents
         if (Storage::disk('public')->exists('tc_intake_forms/documents')) {
             $files = Storage::disk('public')->allFiles('tc_intake_forms/documents');
             foreach ($files as $file) {
-                $filesToProcess->push($file);
+                $registerFile($file, 'Folder: tc_intake_forms/documents');
             }
         }
 
@@ -50,7 +84,7 @@ class MoveDocumentsToPrivate extends Command
         if (Storage::disk('public')->exists('qualified_counsellors')) {
             $files = Storage::disk('public')->allFiles('qualified_counsellors');
             foreach ($files as $file) {
-                $filesToProcess->push($file);
+                $registerFile($file, 'Folder: qualified_counsellors');
             }
         }
 
@@ -58,25 +92,23 @@ class MoveDocumentsToPrivate extends Command
         if (Storage::disk('public')->exists('trainee_agreements')) {
             $files = Storage::disk('public')->allFiles('trainee_agreements');
             foreach ($files as $file) {
-                $filesToProcess->push($file);
+                $registerFile($file, 'Folder: trainee_agreements');
             }
         }
 
         // 4. Collect from database records
-        $dbPaths = collect();
-
         // Trainee applications
         $traineeDocs = ['doc_fitness_to_practise', 'doc_prior_qualifications', 'doc_dbs_certificate', 'doc_cv', 'doc_valid_id', 'doc_indemnity_insurance'];
         foreach (TraineeApplication::all() as $app) {
             foreach ($traineeDocs as $doc) {
                 if ($app->$doc) {
-                    $dbPaths->push($app->$doc);
+                    $registerFile($app->$doc, "trainee_applications.{$doc}");
                 }
             }
             if (is_array($app->onboarding_data) && isset($app->onboarding_data['documents'])) {
-                foreach ($app->onboarding_data['documents'] as $docMeta) {
+                foreach ($app->onboarding_data['documents'] as $docKey => $docMeta) {
                     if (is_array($docMeta) && !empty($docMeta['path'])) {
-                        $dbPaths->push($docMeta['path']);
+                        $registerFile($docMeta['path'], "trainee_applications.onboarding_data.documents.{$docKey}");
                     }
                 }
             }
@@ -91,7 +123,7 @@ class MoveDocumentsToPrivate extends Command
         foreach (TrainingCounsellor::all() as $tc) {
             foreach ($tcDocs as $doc) {
                 if ($tc->$doc) {
-                    $dbPaths->push($tc->$doc);
+                    $registerFile($tc->$doc, "training_counsellors.{$doc}");
                 }
             }
         }
@@ -101,7 +133,7 @@ class MoveDocumentsToPrivate extends Command
         foreach (QcApplication::all() as $qc) {
             foreach ($qcDocs as $doc) {
                 if ($qc->$doc) {
-                    $dbPaths->push($qc->$doc);
+                    $registerFile($qc->$doc, "qc_applications.{$doc}");
                 }
             }
         }
@@ -112,40 +144,17 @@ class MoveDocumentsToPrivate extends Command
             foreach (TcIntakeForm::all() as $intake) {
                 foreach ($intakeDocs as $doc) {
                     if ($intake->$doc) {
-                        $dbPaths->push($intake->$doc);
+                        $registerFile($intake->$doc, "tc_intake_forms.{$doc}");
                     }
                 }
             }
         }
 
-        foreach ($dbPaths as $rawPath) {
-            if (!$rawPath) continue;
-            // Clean path
-            $p = $rawPath;
-            if (filter_var($p, FILTER_VALIDATE_URL)) {
-                $parsed = parse_url($p);
-                $urlPath = $parsed['path'] ?? '';
-                if (str_contains($urlPath, '/storage/')) {
-                    $p = substr($urlPath, strpos($urlPath, '/storage/') + 9);
-                } else {
-                    continue; // External URL
-                }
-            }
-            $p = ltrim($p, '/');
-            if (str_starts_with($p, 'storage/')) {
-                $p = substr($p, 8);
-            }
-            // Skip photos/logos
-            if (str_starts_with($p, 'tc_photos/') || str_starts_with($p, 'client_photos/') || str_starts_with($p, 'company/')) {
-                continue;
-            }
-            if (Storage::disk('public')->exists($p)) {
-                $filesToProcess->push($p);
-            }
-        }
-
         $uniqueFiles = $filesToProcess->unique()->values();
         $count = 0;
+        $totalBytes = 0;
+        $folderStats = [];
+        $sourceStats = [];
 
         foreach ($uniqueFiles as $file) {
             $publicPath = Storage::disk('public')->path($file);
@@ -155,8 +164,24 @@ class MoveDocumentsToPrivate extends Command
                 continue;
             }
 
+            $size = File::size($publicPath);
+            $totalBytes += $size;
+            $folder = dirname($file);
+            if (!isset($folderStats[$folder])) {
+                $folderStats[$folder] = ['count' => 0, 'size' => 0];
+            }
+            $folderStats[$folder]['count']++;
+            $folderStats[$folder]['size'] += $size;
+
+            $sources = $sourceTracker[$file] ?? ['Folder Scan'];
+            foreach ($sources as $src) {
+                $sourceStats[$src] = ($sourceStats[$src] ?? 0) + 1;
+            }
+
             if ($isDryRun) {
-                $this->line("Would " . ($isCopy ? "copy" : "move") . ": {$file}");
+                if (!$isSummaryOnly) {
+                    $this->line("Would " . ($isCopy ? "copy" : "move") . ": {$file}");
+                }
                 $count++;
                 continue;
             }
@@ -177,9 +202,61 @@ class MoveDocumentsToPrivate extends Command
             $count++;
         }
 
+        // Output summary tables
+        $folderRows = [];
+        ksort($folderStats);
+        foreach ($folderStats as $fld => $stats) {
+            $folderRows[] = [
+                $fld,
+                $stats['count'],
+                $this->formatBytes($stats['size']),
+            ];
+        }
+
+        $sourceRows = [];
+        ksort($sourceStats);
+        foreach ($sourceStats as $src => $num) {
+            $parts = explode('.', $src, 2);
+            $sourceRows[] = [
+                $parts[0] ?? $src,
+                $parts[1] ?? 'Directory Scan',
+                $num,
+            ];
+        }
+
+        $this->newLine();
+        $this->info('--- Document Location & Source Summary ---');
+        if (!empty($folderRows)) {
+            $this->table(['Folder', 'Files Count', 'Size'], $folderRows);
+        } else {
+            $this->line('No files found on public disk.');
+        }
+
+        if (!empty($sourceRows)) {
+            $this->newLine();
+            $this->table(['Table / Source', 'Column / Field', 'References Found'], $sourceRows);
+        }
+
+        $this->newLine();
+        $this->info("Total Files: {$count}");
+        $this->info("Total Size: " . $this->formatBytes($totalBytes));
+
         $actionWord = $isCopy ? 'copied' : 'moved';
         $this->info("Successfully {$actionWord} {$count} files to private disk.");
 
         return 0;
+    }
+
+    /**
+     * Format bytes into human readable string.
+     */
+    protected function formatBytes($bytes, $precision = 2): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= pow(1024, $pow);
+        return round($bytes, $precision) . ' ' . $units[$pow];
     }
 }

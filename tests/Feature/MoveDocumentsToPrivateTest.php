@@ -105,4 +105,33 @@ class MoveDocumentsToPrivateTest extends TestCase
         $this->assertTrue(Storage::disk('public')->exists($logoPath));
         $this->assertFalse(Storage::disk('private')->exists($photoPath));
     }
+
+    public function test_move_documents_to_private_summary_only_omits_individual_filenames()
+    {
+        Storage::fake('public');
+        Storage::fake('private');
+
+        $docPath = 'tc_intake_forms/documents/cv/john_doe_cv.pdf';
+        Storage::disk('public')->put($docPath, 'sample cv content');
+
+        $tc = TrainingCounsellor::create([
+            'tc_id' => 'TC-20003',
+            'uuid' => (string) Str::uuid(),
+            'name' => 'John Doe',
+            'email' => 'john.doe@test.com',
+            'dbs_certificate_qualified' => $docPath,
+        ]);
+
+        $this->artisan('documents:move-to-private --copy --dry-run --summary-only')
+            ->doesntExpectOutput('Would copy: ' . $docPath)
+            ->expectsOutputToContain('--- Document Location & Source Summary ---')
+            ->expectsOutputToContain('tc_intake_forms/documents/cv')
+            ->expectsOutputToContain('training_counsellors')
+            ->expectsOutputToContain('Total Files: 1')
+            ->assertExitCode(0);
+
+        // Verify public preserved, private not written
+        $this->assertTrue(Storage::disk('public')->exists($docPath));
+        $this->assertFalse(Storage::disk('private')->exists($docPath));
+    }
 }
