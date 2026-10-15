@@ -136,7 +136,13 @@ class MessageController extends Controller
             } elseif ($folder === 'sent') {
                 $query->where('from_user_id', $user->id)->where('is_trashed', false)->whereNull('deleted_by_sender_at');
             } else {
-                $query->where('to_user_id', $user->id)->where('is_trashed', false)->whereNull('deleted_by_recipient_at');
+                $query->where(function($q) use ($user) {
+                    $q->where('to_user_id', $user->id)
+                      ->orWhere(function($sub) {
+                          $sub->whereNull('to_user_id')
+                              ->where('type', 'counsellor_to_staff');
+                      });
+                })->where('is_trashed', false)->whereNull('deleted_by_recipient_at');
             }
         }
 
@@ -236,6 +242,7 @@ class MessageController extends Controller
                     $q->where('to_user_id', $user->id)
                       ->orWhere('from_user_id', $user->id)
                       ->orWhereNotNull('to_tc_id')
+                      ->orWhere('type', 'counsellor_to_staff')
                       ->orWhereHas('fromUser', function($sub) {
                           $sub->whereNotNull('training_counsellor_id');
                       });
@@ -867,6 +874,14 @@ class MessageController extends Controller
 
         if ($user->isCounsellor() && $user->training_counsellor_id) {
             $query->where('to_tc_id', $user->training_counsellor_id);
+        } elseif ($user->isStaff()) {
+            $query->where(function($q) use ($user) {
+                $q->where('to_user_id', $user->id)
+                  ->orWhere(function($sub) {
+                      $sub->whereNull('to_user_id')
+                          ->where('type', 'counsellor_to_staff');
+                  });
+            })->where('from_user_id', '!=', $user->id);
         } else {
             $query->where('to_user_id', $user->id);
         }

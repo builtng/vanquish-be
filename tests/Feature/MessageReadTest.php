@@ -116,4 +116,69 @@ class MessageReadTest extends TestCase
                    !is_null($event->message->read_at);
         });
     }
+
+    public function test_staff_support_unread_count_includes_counsellor_to_staff_messages()
+    {
+        $counsellor = $this->getCounsellorUser();
+        $admin = $this->getAdminUser();
+
+        // 1. Initial unread count for staff is 0
+        $resBefore = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
+        $resBefore->assertStatus(200)->assertJson(['count' => 0]);
+
+        // 2. Counsellor sends message to Staff Support (to_user_id is null)
+        $message = Message::create([
+            'from_user_id' => $counsellor->id,
+            'to_user_id' => null,
+            'subject' => 'Help with client',
+            'message' => 'Please advise on this client note.',
+            'type' => 'counsellor_to_staff',
+            'is_read' => false,
+        ]);
+
+        // 3. Admin unread-count rises to 1
+        $resAfter = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
+        $resAfter->assertStatus(200)->assertJson(['count' => 1]);
+
+        // 4. Admin conversations endpoint shows conversation with unread_for_user = true
+        $convsRes = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/conversations');
+        $convsRes->assertStatus(200);
+        $convs = $convsRes->json();
+        $this->assertIsArray($convs);
+        $matching = collect($convs)->firstWhere('peer_id', $counsellor->training_counsellor_id);
+        $this->assertNotNull($matching, 'Counsellor conversation must appear in staff conversations');
+        $this->assertTrue($matching['unread_for_user'], 'Conversation must be flagged unread for staff');
+        $this->assertEquals($message->id, $matching['last_message']['id']);
+
+        // 5. Admin marks conversation as read -> unread-count returns to 0
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/messages/conversations/tc/{$counsellor->training_counsellor_id}/mark-read")
+            ->assertStatus(200);
+
+        $resRead = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
+        $resRead->assertStatus(200)->assertJson(['count' => 0]);
+    }
+
+    public function test_staff_support_unread_count_includes_direct_staff_messages()
+    {
+        $admin = $this->getAdminUser();
+        $staffMember = User::create([
+            'name' => 'Colleague Staff',
+            'email' => 'colleague@test.com',
+            'password' => bcrypt('password'),
+            'role' => 'staff',
+        ]);
+
+        $message = Message::create([
+            'from_user_id' => $staffMember->id,
+            'to_user_id' => $admin->id,
+            'subject' => 'Internal Consultation Query',
+            'message' => 'Can you review this case?',
+            'type' => 'staff_to_staff',
+            'is_read' => false,
+        ]);
+
+        $res = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
+        $res->assertStatus(200)->assertJson(['count' => 1]);
+    }
 }
