@@ -13,6 +13,36 @@ class PaperworkAutomaticTicksD04Test extends TestCase
 {
     use RefreshDatabase;
 
+    protected string $testKey = 'test_random_key_jotform_webhook_32chars_long_2026';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.jotform.webhook_key' => $this->testKey]);
+    }
+
+    public function test_all_webhooks_refuse_with_403_when_jotform_webhook_key_not_configured()
+    {
+        config(['services.jotform.webhook_key' => null]);
+
+        $routes = [
+            '/api/jotform/agreement-webhook',
+            '/api/jotform/intake-webhook',
+            '/api/jotform/webhook/trainee',
+            '/api/jotform/personal-therapy-webhook',
+            '/api/jotform/therapy-webhook',
+        ];
+
+        foreach ($routes as $route) {
+            $response = $this->postJson($route . '?key=' . $this->testKey, ['test' => 'data']);
+            $response->assertStatus(403)
+                ->assertJson([
+                    'error' => 'Unauthorized',
+                    'message' => 'Invalid or missing webhook key',
+                ]);
+        }
+    }
+
     public function test_personal_therapy_webhook_requires_secret_key_and_returns_403_without_it()
     {
         $payload = [
@@ -54,6 +84,25 @@ class PaperworkAutomaticTicksD04Test extends TestCase
         $invalidResponse->assertStatus(403);
     }
 
+    public function test_intake_and_trainee_webhooks_require_secret_key_and_return_403_without_it()
+    {
+        // Intake without key
+        $response = $this->postJson('/api/jotform/intake-webhook', ['email' => 'client@example.com']);
+        $response->assertStatus(403);
+
+        // Intake with wrong key
+        $responseWrong = $this->postJson('/api/jotform/intake-webhook?key=wrong_key', ['email' => 'client@example.com']);
+        $responseWrong->assertStatus(403);
+
+        // Trainee without key
+        $traineeResp = $this->postJson('/api/jotform/webhook/trainee', ['email' => 'trainee@example.com']);
+        $traineeResp->assertStatus(403);
+
+        // Trainee with wrong key
+        $traineeRespWrong = $this->postJson('/api/jotform/webhook/trainee?key=wrong_key', ['email' => 'trainee@example.com']);
+        $traineeRespWrong->assertStatus(403);
+    }
+
     public function test_personal_therapy_jotform_webhook_ticks_therapy_form_and_records_audit_trail_with_secret_key()
     {
         $trainee = TraineeApplication::create([
@@ -76,7 +125,7 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'formTitle' => 'Personal Therapy Form',
         ];
 
-        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=' . $this->testKey, $payload);
         $response->assertStatus(200)
             ->assertJson([
                 'message' => 'Webhook received and processed',
@@ -101,7 +150,7 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'email' => 'nonexistent.trainee@example.com',
         ];
 
-        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response = $this->postJson('/api/jotform/personal-therapy-webhook?key=' . $this->testKey, $payload);
         $response->assertStatus(200)
             ->assertJson([
                 'message' => 'Webhook received and processed',
@@ -130,7 +179,7 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'signature' => 'https://files.jotform.com/sig123.png',
         ];
 
-        $response = $this->postJson('/api/jotform/agreement-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response = $this->postJson('/api/jotform/agreement-webhook?key=' . $this->testKey, $payload);
         $response->assertStatus(200)
             ->assertJson([
                 'message' => 'Webhook received and processed',
@@ -144,7 +193,7 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             'submissionID' => '111222333',
             'email' => 'unknown@example.com',
         ];
-        $notFoundResponse = $this->postJson('/api/jotform/agreement-webhook?key=vqt_jotform_secret_2026', $notFoundPayload);
+        $notFoundResponse = $this->postJson('/api/jotform/agreement-webhook?key=' . $this->testKey, $notFoundPayload);
         $notFoundResponse->assertStatus(200)
             ->assertJson([
                 'message' => 'Webhook received and processed',
@@ -173,7 +222,7 @@ class PaperworkAutomaticTicksD04Test extends TestCase
             ]),
         ];
 
-        $response = $this->postJson('/api/jotform/therapy-webhook?key=vqt_jotform_secret_2026', $payload);
+        $response = $this->postJson('/api/jotform/therapy-webhook?key=' . $this->testKey, $payload);
         $response->assertStatus(200)
             ->assertJson([
                 'message' => 'Webhook received and processed',

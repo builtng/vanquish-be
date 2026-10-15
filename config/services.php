@@ -73,7 +73,7 @@ return [
 
     // JotForm Webhooks
     'jotform' => [
-        'webhook_key' => env('JOTFORM_WEBHOOK_KEY', 'vqt_jotform_secret_2026'),
+        'webhook_key' => env('JOTFORM_WEBHOOK_KEY'),
     ],
 
 ];

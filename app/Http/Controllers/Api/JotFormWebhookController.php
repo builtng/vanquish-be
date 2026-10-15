@@ -25,11 +25,24 @@ class JotFormWebhookController extends Controller
 
     /**
      * Verify JotForm webhook secret key.
-     * Returns 403 Response if invalid/missing, null if valid.
+     * Returns 403 Response if invalid/missing or if key is not configured, null if valid.
      */
     protected function verifyWebhookSecret(Request $request): ?\Illuminate\Http\JsonResponse
     {
-        $expectedKey = config('services.jotform.webhook_key', env('JOTFORM_WEBHOOK_KEY', 'vqt_jotform_secret_2026'));
+        $expectedKey = config('services.jotform.webhook_key');
+
+        if (empty($expectedKey)) {
+            Log::error('JotForm Webhook: JOTFORM_WEBHOOK_KEY is not configured in environment. Refusing request with 403.', [
+                'ip' => $request->ip(),
+                'path' => $request->path(),
+            ]);
+
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Invalid or missing webhook key',
+            ], 403);
+        }
+
         $providedKey = $request->query('key') ?? $request->input('key') ?? $request->header('X-Webhook-Key');
 
         if (empty($providedKey) || !hash_equals((string) $expectedKey, (string) $providedKey)) {
@@ -335,6 +348,10 @@ class JotFormWebhookController extends Controller
      */
     public function handleIntakeSubmission(Request $request)
     {
+        if ($authResponse = $this->verifyWebhookSecret($request)) {
+            return $authResponse;
+        }
+
         try {
             // Log the incoming webhook for debugging
             Log::info('JotForm Intake Webhook Received', [
@@ -470,6 +487,10 @@ class JotFormWebhookController extends Controller
      */
     public function handleTraineeSubmission(Request $request): \Illuminate\Http\JsonResponse
     {
+        if ($authResponse = $this->verifyWebhookSecret($request)) {
+            return $authResponse;
+        }
+
         try {
             Log::info('JotForm Stage-1 Trainee Webhook Received', [
                 'ip'      => $request->ip(),
