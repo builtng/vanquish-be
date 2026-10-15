@@ -9,6 +9,7 @@ use App\Models\TraineeApplication;
 use App\Models\TrainingCounsellor;
 use App\Models\QcApplication;
 use App\Models\TcIntakeForm;
+use App\Models\Client;
 
 class MoveDocumentsToPrivate extends Command
 {
@@ -24,7 +25,7 @@ class MoveDocumentsToPrivate extends Command
      *
      * @var string
      */
-    protected $description = 'Move or copy applicant and counsellor documents from public disk to private disk';
+    protected $description = 'Move or copy applicant, counsellor, and client agreement documents from public disk to private disk';
 
     /**
      * Execute the console command.
@@ -96,6 +97,14 @@ class MoveDocumentsToPrivate extends Command
             }
         }
 
+        // 4. Files in signatures
+        if (Storage::disk('public')->exists('signatures')) {
+            $files = Storage::disk('public')->allFiles('signatures');
+            foreach ($files as $file) {
+                $registerFile($file, 'Folder: signatures');
+            }
+        }
+
         // 4. Collect from database records
         // Trainee applications
         $traineeDocs = ['doc_fitness_to_practise', 'doc_prior_qualifications', 'doc_dbs_certificate', 'doc_cv', 'doc_valid_id', 'doc_indemnity_insurance'];
@@ -147,6 +156,13 @@ class MoveDocumentsToPrivate extends Command
                         $registerFile($intake->$doc, "tc_intake_forms.{$doc}");
                     }
                 }
+            }
+        }
+
+        // Client agreement signatures
+        foreach (Client::withTrashed()->whereNotNull('agreement_signature_url')->get(['id', 'agreement_signature_url']) as $client) {
+            if ($client->agreement_signature_url) {
+                $registerFile($client->agreement_signature_url, 'clients.agreement_signature_url');
             }
         }
 

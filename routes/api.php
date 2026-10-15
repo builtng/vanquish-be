@@ -151,6 +151,8 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     Route::get('/clients/{client}', [ClientController::class, 'show']);
     Route::get('/clients/{client}/details', [ClientController::class, 'details']);
     Route::get('/clients/{client}/download-report', [ClientController::class, 'downloadReport']);
+    Route::get('/clients/{client}/signature', [ClientAgreementController::class, 'downloadSignature']);
+    Route::get('/clients/{client}/document/signature', [ClientAgreementController::class, 'downloadSignature']);
 
     // Protected client actions
     Route::middleware('staff')->group(function () {

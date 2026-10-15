@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\QcApplication;
 use App\Models\TraineeApplication;
 use App\Models\TrainingCounsellor;
+use App\Models\Client;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -133,5 +134,60 @@ class MoveDocumentsToPrivateTest extends TestCase
         // Verify public preserved, private not written
         $this->assertTrue(Storage::disk('public')->exists($docPath));
         $this->assertFalse(Storage::disk('private')->exists($docPath));
+    }
+
+    public function test_move_documents_to_private_moves_client_agreement_signatures_from_public_to_private()
+    {
+        Storage::fake('public');
+        Storage::fake('private');
+
+        $sigPath = 'signatures/client_agreement_signature_123.png';
+        Storage::disk('public')->put($sigPath, 'signature binary png');
+
+        $client = Client::create([
+            'uuid' => (string) Str::uuid(),
+            'client_id' => 'CL-80001',
+            'name' => 'Signature Client',
+            'email' => 'sig.client@test.com',
+            'agreement_status' => 'signed',
+            'agreement_signature_url' => $sigPath,
+        ]);
+
+        $this->artisan('documents:move-to-private')
+            ->expectsOutputToContain('Moved: ' . $sigPath)
+            ->expectsOutputToContain('Successfully moved 1 files to private disk.')
+            ->assertExitCode(0);
+
+        // Signature must be on private disk and removed from public disk
+        $this->assertTrue(Storage::disk('private')->exists($sigPath));
+        $this->assertFalse(Storage::disk('public')->exists($sigPath));
+    }
+
+    public function test_move_documents_to_private_dry_run_reports_signatures()
+    {
+        Storage::fake('public');
+        Storage::fake('private');
+
+        $sigPath = 'signatures/dry_run_sig.png';
+        Storage::disk('public')->put($sigPath, 'dry run signature');
+
+        $client = Client::create([
+            'uuid' => (string) Str::uuid(),
+            'client_id' => 'CL-80002',
+            'name' => 'Dry Run Client',
+            'email' => 'dryrun.client@test.com',
+            'agreement_status' => 'signed',
+            'agreement_signature_url' => $sigPath,
+        ]);
+
+        $this->artisan('documents:move-to-private --dry-run')
+            ->expectsOutputToContain('Would move: ' . $sigPath)
+            ->expectsOutputToContain('signatures')
+            ->expectsOutputToContain('clients')
+            ->assertExitCode(0);
+
+        // Dry run must NOT move the file
+        $this->assertTrue(Storage::disk('public')->exists($sigPath));
+        $this->assertFalse(Storage::disk('private')->exists($sigPath));
     }
 }

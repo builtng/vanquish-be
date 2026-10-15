@@ -9,6 +9,7 @@ use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Gate;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class ClientAgreementController extends Controller
@@ -120,8 +121,8 @@ class ClientAgreementController extends Controller
                     // Generate unique filename
                     $filename = 'signatures/' . $client->uuid . '_' . time() . '.png';
 
-                    // Store in public storage
-                    Storage::disk('public')->put($filename, $signatureImage);
+                    // Store in private storage
+                    Storage::disk('private')->put($filename, $signatureImage);
 
                     $signatureUrl = $filename;
 
@@ -248,9 +249,32 @@ class ClientAgreementController extends Controller
 
         $signaturePath = null;
         if ($client->agreement_signature_url) {
-            $absolutePath = storage_path('app/public/' . $client->agreement_signature_url);
-            if (file_exists($absolutePath)) {
-                $signaturePath = $absolutePath;
+            $p = $client->agreement_signature_url;
+            if (filter_var($p, FILTER_VALIDATE_URL)) {
+                $parsed = parse_url($p);
+                $urlPath = $parsed['path'] ?? '';
+                if (str_contains($urlPath, '/storage/')) {
+                    $p = substr($urlPath, strpos($urlPath, '/storage/') + 9);
+                }
+            }
+            $p = ltrim($p, '/');
+            if (str_starts_with($p, 'storage/')) {
+                $p = substr($p, 8);
+            }
+
+            $rawContents = null;
+            if (Storage::disk('private')->exists($p)) {
+                $rawContents = Storage::disk('private')->get($p);
+            } elseif (Storage::disk('public')->exists($p)) {
+                $rawContents = Storage::disk('public')->get($p);
+            } elseif (file_exists(storage_path('app/private/' . $p))) {
+                $rawContents = file_get_contents(storage_path('app/private/' . $p));
+            } elseif (file_exists(storage_path('app/public/' . $p))) {
+                $rawContents = file_get_contents(storage_path('app/public/' . $p));
+            }
+
+            if ($rawContents) {
+                $signaturePath = 'data:image/png;base64,' . base64_encode($rawContents);
             }
         }
 
@@ -325,5 +349,76 @@ class ClientAgreementController extends Controller
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal error',
             ], 500);
         }
+    }
+
+    /**
+     * Download client agreement signature securely via authenticated route.
+     */
+    public function downloadSignature(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        $client = $this->resolveClient($id);
+        if (!$client && is_numeric($id)) {
+            $client = Client::find($id);
+        }
+
+        if (!$client) {
+            return response()->json(['message' => 'Client not found'], 404);
+        }
+
+        if (!Gate::allows('view', $client) && !in_array($user->role, ['admin', 'staff', 'superadmin', 'consultation_staff', 'compliance_officer'])) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $path = $client->agreement_signature_url;
+        if (!$path) {
+            return response()->json(['message' => 'Signature not found for this client'], 404);
+        }
+
+        if (filter_var($path, FILTER_VALIDATE_URL)) {
+            $parsedUrl = parse_url($path);
+            $urlPath = $parsedUrl['path'] ?? '';
+            if (str_contains($urlPath, '/storage/')) {
+                $path = substr($urlPath, strpos($urlPath, '/storage/') + 9);
+            }
+        }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, 8);
+        }
+
+        $disk = null;
+        if (Storage::disk('private')->exists($path)) {
+            $disk = 'private';
+        } elseif (Storage::disk('public')->exists($path)) {
+            $disk = 'public';
+        }
+
+        if (!$disk) {
+            if (file_exists(storage_path('app/private/' . $path))) {
+                $disk = 'private';
+            } elseif (file_exists(storage_path('app/public/' . $path))) {
+                $disk = 'public';
+            }
+        }
+
+        if (!$disk) {
+            return response()->json(['message' => 'Signature file does not exist in storage'], 404);
+        }
+
+        $filename = basename($path);
+        $cleanFilename = preg_replace('/^\d+_[a-f0-9]+_/', '', $filename);
+        $cleanFilename = preg_replace('/^[a-f0-9\-]{36}_\d+_?/', '', $cleanFilename);
+        if (empty($cleanFilename) || !str_contains($cleanFilename, '.')) {
+            $sanitizedName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '_', $client->name));
+            $cleanFilename = "signature_{$sanitizedName}.png";
+        }
+
+        return Storage::disk($disk)->download($path, $cleanFilename);
     }
 }
