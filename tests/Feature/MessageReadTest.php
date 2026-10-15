@@ -181,4 +181,23 @@ class MessageReadTest extends TestCase
         $res = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
         $res->assertStatus(200)->assertJson(['count' => 1]);
     }
+
+    public function test_staff_support_unread_count_includes_messages_from_counsellor_users()
+    {
+        $admin = $this->getAdminUser();
+        $counsellor = $this->getCounsellorUser();
+
+        $message = Message::create([
+            'from_user_id' => $counsellor->id,
+            'to_user_id' => null,
+            'to_tc_id' => $counsellor->training_counsellor_id,
+            'subject' => 'Counsellor query',
+            'message' => 'Hello team',
+            'type' => 'staff_to_counsellor',
+            'is_read' => false,
+        ]);
+
+        $res = $this->actingAs($admin, 'sanctum')->getJson('/api/messages/unread-count');
+        $res->assertStatus(200)->assertJson(['count' => 1]);
+    }
 }

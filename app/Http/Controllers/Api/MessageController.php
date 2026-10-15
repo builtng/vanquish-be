@@ -878,8 +878,12 @@ class MessageController extends Controller
             $query->where(function($q) use ($user) {
                 $q->where('to_user_id', $user->id)
                   ->orWhere(function($sub) {
-                      $sub->whereNull('to_user_id')
-                          ->where('type', 'counsellor_to_staff');
+                      $sub->where(function($inner) {
+                          $inner->where('type', 'counsellor_to_staff')
+                                ->orWhereHas('fromUser', function($fu) {
+                                    $fu->whereNotNull('training_counsellor_id');
+                                });
+                      });
                   });
             })->where('from_user_id', '!=', $user->id);
         } else {
