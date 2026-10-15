@@ -249,7 +249,6 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/pending-matches', [ClientController::class, 'pendingMatches']);
         Route::get('/pending-matches/count', [ClientController::class, 'pendingMatchesCount']);
         Route::get('/pending-matches/{client}/suggestions', [ClientController::class, 'matchSuggestions']);
-        Route::post('/pending-matches/match', [ClientController::class, 'matchSuggestions']);
         Route::post('/matches', [ClientController::class, 'assignMatch']);
         Route::post('/unassign-match', [ClientController::class, 'unassignMatch']);
         Route::get('/matching-algorithm-settings', [MatchingAlgorithmSettingController::class, 'index']);
