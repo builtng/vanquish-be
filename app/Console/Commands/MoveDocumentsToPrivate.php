@@ -54,7 +54,15 @@ class MoveDocumentsToPrivate extends Command
             }
         }
 
-        // 3. Collect from database records
+        // 3. Files in trainee_agreements
+        if (Storage::disk('public')->exists('trainee_agreements')) {
+            $files = Storage::disk('public')->allFiles('trainee_agreements');
+            foreach ($files as $file) {
+                $filesToProcess->push($file);
+            }
+        }
+
+        // 4. Collect from database records
         $dbPaths = collect();
 
         // Trainee applications
@@ -63,6 +71,13 @@ class MoveDocumentsToPrivate extends Command
             foreach ($traineeDocs as $doc) {
                 if ($app->$doc) {
                     $dbPaths->push($app->$doc);
+                }
+            }
+            if (is_array($app->onboarding_data) && isset($app->onboarding_data['documents'])) {
+                foreach ($app->onboarding_data['documents'] as $docMeta) {
+                    if (is_array($docMeta) && !empty($docMeta['path'])) {
+                        $dbPaths->push($docMeta['path']);
+                    }
                 }
             }
         }
