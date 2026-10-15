@@ -130,4 +130,63 @@ class TrainingCounsellorJourneyJ11Test extends TestCase
         $this->assertFalse($journey[4]['completed']); // Not Active
         $this->assertTrue($journey[0]['current']); // Current is Application Received
     }
+
+    public function test_manual_tc_without_application_shows_only_real_stages_when_active(): void
+    {
+        $tc = TrainingCounsellor::create([
+            'tc_id' => 'TESTQA TC017',
+            'name' => 'Manual Active TC',
+            'email' => 'manual.tc@example.com',
+            'status' => 'Active',
+            'counsellor_type' => 'Trainee',
+        ]);
+
+        $response = $this->actingAs($this->adminUser, 'sanctum')
+            ->getJson("/api/training-counsellors/{$tc->id}");
+
+        $response->assertStatus(200);
+        $journey = $response->json('journey');
+
+        // Must show only real stages (Added by admin, Active)
+        $this->assertCount(2, $journey);
+        $stageNames = array_column($journey, 'stage');
+        $this->assertEquals(['Added by admin', 'Active'], $stageNames);
+
+        // Does NOT show Application, Interview or Induction
+        $this->assertNotContains('Application Received', $stageNames);
+        $this->assertNotContains('Interview Invited and Attended', $stageNames);
+        $this->assertNotContains('Accepted', $stageNames);
+        $this->assertNotContains('Induction Attended', $stageNames);
+
+        $this->assertTrue($journey[0]['completed']);
+        $this->assertFalse($journey[0]['current']);
+        $this->assertTrue($journey[1]['completed']);
+        $this->assertTrue($journey[1]['current']);
+    }
+
+    public function test_manual_tc_without_application_shows_only_real_stages_when_inactive(): void
+    {
+        $tc = TrainingCounsellor::create([
+            'tc_id' => 'TESTQA TC018',
+            'name' => 'Manual Inactive TC',
+            'email' => 'manual.inactive@example.com',
+            'status' => 'Inactive',
+            'counsellor_type' => 'Trainee',
+        ]);
+
+        $response = $this->actingAs($this->adminUser, 'sanctum')
+            ->getJson("/api/training-counsellors/{$tc->id}");
+
+        $response->assertStatus(200);
+        $journey = $response->json('journey');
+
+        $this->assertCount(2, $journey);
+        $stageNames = array_column($journey, 'stage');
+        $this->assertEquals(['Added by admin', 'Active'], $stageNames);
+
+        $this->assertTrue($journey[0]['completed']);
+        $this->assertTrue($journey[0]['current']);
+        $this->assertFalse($journey[1]['completed']);
+        $this->assertFalse($journey[1]['current']);
+    }
 }

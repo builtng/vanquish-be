@@ -319,6 +319,30 @@ class TrainingCounsellorController extends Controller
      */
     protected function buildJourney(TrainingCounsellor $tc, $app = null): array
     {
+        // For trainees/counsellors added by hand with no application behind them,
+        // show only the stages that really happened (Added by admin, Active)
+        if (!$app) {
+            $isActive = in_array($tc->status, ['Active', 'At Capacity', 'On Leave']);
+            $createdDate = $tc->created_at ? $tc->created_at->toIso8601String() : null;
+
+            return [
+                [
+                    'stage'     => 'Added by admin',
+                    'name'      => 'Added by admin',
+                    'date'      => $createdDate,
+                    'completed' => true,
+                    'current'   => !$isActive,
+                ],
+                [
+                    'stage'     => 'Active',
+                    'name'      => 'Active',
+                    'date'      => $isActive ? $createdDate : null,
+                    'completed' => $isActive,
+                    'current'   => $isActive,
+                ],
+            ];
+        }
+
         // 1. Application Received
         $appReceivedDate = $app?->created_at?->toIso8601String() 
             ?? $app?->jotform_submitted_at?->toIso8601String() 
