@@ -10,6 +10,8 @@ use App\Models\TrainingCounsellor;
 use App\Models\QcApplication;
 use App\Models\TcIntakeForm;
 use App\Models\Client;
+use App\Models\SharedDocument;
+use App\Models\Message;
 
 class MoveDocumentsToPrivate extends Command
 {
@@ -105,6 +107,22 @@ class MoveDocumentsToPrivate extends Command
             }
         }
 
+        // 5. Files in shared_documents
+        if (Storage::disk('public')->exists('shared_documents')) {
+            $files = Storage::disk('public')->allFiles('shared_documents');
+            foreach ($files as $file) {
+                $registerFile($file, 'Folder: shared_documents');
+            }
+        }
+
+        // 6. Files in message_attachments
+        if (Storage::disk('public')->exists('message_attachments')) {
+            $files = Storage::disk('public')->allFiles('message_attachments');
+            foreach ($files as $file) {
+                $registerFile($file, 'Folder: message_attachments');
+            }
+        }
+
         // 4. Collect from database records
         // Trainee applications
         $traineeDocs = ['doc_fitness_to_practise', 'doc_prior_qualifications', 'doc_dbs_certificate', 'doc_cv', 'doc_valid_id', 'doc_indemnity_insurance'];
@@ -163,6 +181,24 @@ class MoveDocumentsToPrivate extends Command
         foreach (Client::withTrashed()->whereNotNull('agreement_signature_url')->get(['id', 'agreement_signature_url']) as $client) {
             if ($client->agreement_signature_url) {
                 $registerFile($client->agreement_signature_url, 'clients.agreement_signature_url');
+            }
+        }
+
+        // Shared documents
+        if (class_exists(SharedDocument::class)) {
+            foreach (SharedDocument::all() as $sd) {
+                if ($sd->file_path) {
+                    $registerFile($sd->file_path, 'shared_documents.file_path');
+                }
+            }
+        }
+
+        // Message attachments
+        if (class_exists(Message::class)) {
+            foreach (Message::whereNotNull('attachment_path')->get(['id', 'attachment_path']) as $msg) {
+                if ($msg->attachment_path) {
+                    $registerFile($msg->attachment_path, 'messages.attachment_path');
+                }
             }
         }
 

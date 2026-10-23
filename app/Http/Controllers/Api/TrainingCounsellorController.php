@@ -1804,7 +1804,7 @@ class TrainingCounsellorController extends Controller
                     ->orWhere('id', $id)
                     ->firstOrFail();
             }
-            $portalUrl = rtrim(config('app.frontend_url', 'https://vqtmanagement.com'), '/') . '/counsellor-login';
+            $portalUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/') . '/counsellor-login';
 
             // 1. Find or create User account (role = counsellor)
             $existingUser = User::where('email', $tc->email)->first();
@@ -1879,7 +1879,7 @@ class TrainingCounsellorController extends Controller
             'failed' => [],
         ];
 
-        $portalUrl = rtrim(config('app.frontend_url', 'https://vqtmanagement.com'), '/') . '/counsellor-login';
+        $portalUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/') . '/counsellor-login';
 
         foreach ($validated['ids'] as $id) {
             try {

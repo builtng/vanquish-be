@@ -351,11 +351,8 @@ class ApplicationPipelineService
      */
     protected function sendAcceptanceAndPaperworkEmails(Model $application, ?string $inductionDate): void
     {
-        $companySettings = DB::table('company_settings')->pluck('value', 'key')->toArray();
-
-        $therapyFormUrl = ($companySettings['use_internal_agreement_form'] ?? '0') === '1'
-            ? rtrim(config('app.frontend_url'), '/') . '/therapy-form'
-            : ($companySettings['jotform_therapy_form_url'] ?? 'https://form.jotform.com/241002800146035');
+        $frontendUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/');
+        $therapyFormUrl = $frontendUrl . '/therapy-form?email=' . urlencode($application->email);
 
         if (empty($application->placement_response_token)) {
             $application->update(['placement_response_token' => Str::random(40)]);

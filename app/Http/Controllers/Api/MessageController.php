@@ -14,6 +14,7 @@ use App\Events\MessageSent;
 use App\Events\MessageRead;
 use App\Models\EmailLog;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 
 class MessageController extends Controller
 {
@@ -140,7 +141,12 @@ class MessageController extends Controller
                     $q->where('to_user_id', $user->id)
                       ->orWhere(function($sub) {
                           $sub->whereNull('to_user_id')
-                              ->where('type', 'counsellor_to_staff');
+                              ->where(function($inner) {
+                                  $inner->where('type', 'counsellor_to_staff')
+                                        ->orWhereHas('fromUser', function($fu) {
+                                            $fu->whereNotNull('training_counsellor_id');
+                                        });
+                              });
                       });
                 })->where('is_trashed', false)->whereNull('deleted_by_recipient_at');
             }
@@ -356,7 +362,12 @@ class MessageController extends Controller
                                         $sub->where('to_user_id', $user->id)
                                             ->orWhere(function($sub2) {
                                                 $sub2->whereNull('to_user_id')
-                                                     ->where('type', 'counsellor_to_staff');
+                                                     ->where(function($inner2) {
+                                                         $inner2->where('type', 'counsellor_to_staff')
+                                                                ->orWhereHas('fromUser', function($fu) {
+                                                                    $fu->whereNotNull('training_counsellor_id');
+                                                                });
+                                                     });
                                             });
                                     });
                                 }
@@ -424,7 +435,7 @@ class MessageController extends Controller
 
             if ($request->hasFile('attachment')) {
                 $file = $request->file('attachment');
-                $attachmentPath = $file->store('message_attachments', 'public');
+                $attachmentPath = $file->store('message_attachments', 'private');
                 $attachmentName = $file->getClientOriginalName();
                 $attachmentType = $file->getClientMimeType();
             }
@@ -621,7 +632,7 @@ class MessageController extends Controller
 
             if ($request->hasFile('attachment')) {
                 $file = $request->file('attachment');
-                $attachmentPath = $file->store('message_attachments', 'public');
+                $attachmentPath = $file->store('message_attachments', 'private');
                 $attachmentName = $file->getClientOriginalName();
                 $attachmentType = $file->getClientMimeType();
             }
@@ -703,7 +714,7 @@ class MessageController extends Controller
 
         if ($request->hasFile('attachment')) {
             $file = $request->file('attachment');
-            $attachmentPath = $file->store('message_attachments', 'public');
+            $attachmentPath = $file->store('message_attachments', 'private');
             $attachmentName = $file->getClientOriginalName();
             $attachmentType = $file->getClientMimeType();
         }
@@ -870,22 +881,29 @@ class MessageController extends Controller
     public function unreadCount(Request $request)
     {
         $user = $request->user();
-        $query = Message::where('is_read', false)->where('is_trashed', false);
+        $query = Message::where('is_read', false)
+            ->where('is_trashed', false)
+            ->whereNull('deleted_by_recipient_at')
+            ->where('from_user_id', '!=', $user->id);
 
         if ($user->isCounsellor() && $user->training_counsellor_id) {
-            $query->where('to_tc_id', $user->training_counsellor_id);
+            $query->where(function($q) use ($user) {
+                $q->where('to_tc_id', $user->training_counsellor_id)
+                  ->orWhere('to_user_id', $user->id);
+            });
         } elseif ($user->isStaff()) {
             $query->where(function($q) use ($user) {
                 $q->where('to_user_id', $user->id)
                   ->orWhere(function($sub) {
-                      $sub->where(function($inner) {
-                          $inner->where('type', 'counsellor_to_staff')
-                                ->orWhereHas('fromUser', function($fu) {
-                                    $fu->whereNotNull('training_counsellor_id');
-                                });
-                      });
+                      $sub->whereNull('to_user_id')
+                          ->where(function($inner) {
+                              $inner->where('type', 'counsellor_to_staff')
+                                    ->orWhereHas('fromUser', function($fu) {
+                                        $fu->whereNotNull('training_counsellor_id');
+                                    });
+                          });
                   });
-            })->where('from_user_id', '!=', $user->id);
+            });
         } else {
             $query->where('to_user_id', $user->id);
         }
@@ -896,12 +914,34 @@ class MessageController extends Controller
     }
 
     /**
+     * Check if a user is authorized to modify (trash/restore) a message
+     */
+    protected function canModifyMessage($user, Message $message): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        $isSender = (int)$message->from_user_id === (int)$user->id;
+        $isRecipient = (int)$message->to_user_id === (int)$user->id
+            || ($user->training_counsellor_id && (int)$message->to_tc_id === (int)$user->training_counsellor_id)
+            || ($user->isStaff() && $message->type === 'counsellor_to_staff');
+        $isStaff = method_exists($user, 'isStaff') ? $user->isStaff() : in_array($user->role, ['admin', 'super_admin']);
+
+        return $isSender || $isRecipient || $isStaff;
+    }
+
+    /**
      * Trash a message
      */
     public function trash(Request $request, $id)
     {
         $user = $request->user();
         $message = Message::findOrFail($id);
+
+        if (!$this->canModifyMessage($user, $message)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         $message->update([
             'is_trashed' => true,
@@ -918,6 +958,10 @@ class MessageController extends Controller
     {
         $user = $request->user();
         $message = Message::findOrFail($id);
+
+        if (!$this->canModifyMessage($user, $message)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         $message->update([
             'is_trashed' => false,
@@ -957,6 +1001,45 @@ class MessageController extends Controller
         $message->save();
 
         return response()->json(['message' => 'Message deleted successfully']);
+    }
+
+    /**
+     * Download message attachment with authenticated access check
+     */
+    public function downloadAttachment(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $message = Message::findOrFail($id);
+
+        if (!$message->attachment_path) {
+            return response()->json(['message' => 'No attachment found'], 404);
+        }
+
+        // Authorization check: sender, recipient, or staff
+        $isSender = (int)$message->from_user_id === (int)$user->id;
+        $isRecipient = (int)$message->to_user_id === (int)$user->id
+            || ($user->training_counsellor_id && (int)$message->to_tc_id === (int)$user->training_counsellor_id);
+        $isStaff = $user->isStaff();
+
+        if (!$isSender && !$isRecipient && !$isStaff) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $disk = Storage::disk('private')->exists($message->attachment_path)
+            ? 'private'
+            : (Storage::disk('public')->exists($message->attachment_path) ? 'public' : null);
+
+        if (!$disk) {
+            return response()->json(['message' => 'Attachment file not found'], 404);
+        }
+
+        $filename = $message->attachment_name ?: basename($message->attachment_path);
+
+        return Storage::disk($disk)->download($message->attachment_path, $filename);
     }
 
     /**

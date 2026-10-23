@@ -29,7 +29,7 @@ class SecurityHeaders
         }
 
         // Content Security Policy
-        $csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://stats.pusher.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: *.vqtmanagement.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss://*.vqtmanagement.com https://vqtmanagement.com https://*.vqtmanagement.com https://api.stripe.com *.pusher.com wss://*.pusher.com http://localhost:8000 http://127.0.0.1:8000 http://localhost:3000 http://127.0.0.1:3000; frame-src https://js.stripe.com;";
+        $csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://stats.pusher.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: *.vqtmanagement.com vqtmanagement.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss://*.vqtmanagement.com https://vqtmanagement.com https://*.vqtmanagement.com https://api.stripe.com *.pusher.com wss://*.pusher.com http://localhost:8000 http://127.0.0.1:8000 http://localhost:3000 http://127.0.0.1:3000; frame-src https://js.stripe.com;";
         $response->headers->set('Content-Security-Policy', $csp);
 
         // Remove server information

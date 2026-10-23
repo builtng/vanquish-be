@@ -38,18 +38,28 @@ class ConsultationController extends Controller
 
         $consultations = $query->orderBy('id', 'desc')->get();
 
-        // Ensure each client has service_type resolved from intake form if missing on client record
+        // Ensure each client has service_type resolved and normalized
         foreach ($consultations as $consultation) {
-            if ($consultation->client && empty($consultation->client->service_type)) {
-                $intakeServiceType = \App\Models\ClientIntakeForm::where('client_id', $consultation->client->id)
-                    ->orWhere('email', $consultation->client->email)
-                    ->whereNotNull('service_type')
-                    ->latest()
-                    ->value('service_type');
-                if ($intakeServiceType) {
-                    $consultation->client->service_type = $intakeServiceType;
-                    $consultation->client->saveQuietly();
+            if ($consultation->client) {
+                if (empty($consultation->client->service_type)) {
+                    $intakeServiceType = \App\Models\ClientIntakeForm::where('client_id', $consultation->client->id)
+                        ->orWhere('email', $consultation->client->email)
+                        ->whereNotNull('service_type')
+                        ->latest()
+                        ->value('service_type');
+                    if ($intakeServiceType) {
+                        $consultation->client->service_type = $intakeServiceType;
+                    }
                 }
+                if ($consultation->client->service_type && in_array(strtolower(trim($consultation->client->service_type)), ['low-cost', 'low_cost', 'low cost'])) {
+                    $consultation->client->service_type = 'Low Cost';
+                }
+                $consultation->client->saveQuietly();
+            }
+
+            if ($consultation->service_type && in_array(strtolower(trim($consultation->service_type)), ['low-cost', 'low_cost', 'low cost'])) {
+                $consultation->service_type = 'Low Cost';
+                $consultation->saveQuietly();
             }
         }
 

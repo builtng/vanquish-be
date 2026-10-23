@@ -24,7 +24,7 @@
 
             <!-- Login Button -->
             <div style="text-align: center; margin: 32px 0;">
-                <a href="{{ $loginUrl ?? (rtrim(config('app.frontend_url', 'https://vqtmanagement.com'), '/') . '/counsellor-login') }}"
+                <a href="{{ $loginUrl ?? (rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/') . '/counsellor-login') }}"
                     style="display: inline-block; background-color: #6f1d56; color: #ffffff; padding: 14px 36px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 2px 4px rgba(111, 29, 86, 0.25);">
                     Log in to Portal
                 </a>

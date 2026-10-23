@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SharedDocument;
 use App\Models\Folder;
 use App\Models\FolderShare;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -52,14 +53,10 @@ class SharedDocumentController extends Controller
                 });
             } else {
                 // Inside a folder, check if the folder itself (or a parent) is shared
-                // For simplicity, we assume root-level sharing access
                 $currentFolder = Folder::find($folderId);
-                if (!$currentFolder || $currentFolder->type === 'internal') {
+                if (!$currentFolder || !$this->canAccessFolder($user, $currentFolder)) {
                     return response()->json(['folders' => [], 'files' => []]);
                 }
-                
-                // You could check permissions recursively here, but for now we trust the client logic 
-                // and the fact that you can only "get" here by navigating from a shared root.
             }
         }
 
@@ -146,7 +143,7 @@ class SharedDocumentController extends Controller
         $fileSize = $this->formatBytes($file->getSize());
         $fileType = strtoupper($file->getClientOriginalExtension());
         
-        $path = $file->store('shared_documents', 'public');
+        $path = $file->store('shared_documents', 'private');
 
         $folderId = $request->folder_id ?: null;
         $clientId = $request->client_id ?: null;
@@ -154,6 +151,18 @@ class SharedDocumentController extends Controller
         $category = $request->category ?: null;
 
         $user = $request->user();
+        if (!$user->isStaff()) {
+            if ($request->category === 'private' || $request->client_id) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+            if ($request->folder_id) {
+                $targetFolder = Folder::find($request->folder_id);
+                if (!$targetFolder || !$this->canAccessFolder($user, $targetFolder)) {
+                    return response()->json(['message' => 'Unauthorized'], 403);
+                }
+            }
+        }
+
         // If uploader is a counsellor and no TC association sent, auto-associate with them
         if ($user->role === 'counsellor' && !$tcId && $user->training_counsellor_id) {
             $tcId = $user->training_counsellor_id;
@@ -183,6 +192,7 @@ class SharedDocumentController extends Controller
      */
     public function destroy(SharedDocument $document)
     {
+        Storage::disk('private')->delete($document->file_path);
         Storage::disk('public')->delete($document->file_path);
         $document->delete();
         
@@ -204,6 +214,7 @@ class SharedDocumentController extends Controller
     {
         // Delete files in this folder
         foreach ($folder->documents as $doc) {
+            Storage::disk('private')->delete($doc->file_path);
             Storage::disk('public')->delete($doc->file_path);
             $doc->delete();
         }
@@ -218,13 +229,22 @@ class SharedDocumentController extends Controller
     /**
      * Download the file.
      */
-    public function download(SharedDocument $document)
+    public function download(Request $request, SharedDocument $document)
     {
-        if (!Storage::disk('public')->exists($document->file_path)) {
+        $user = $request->user();
+        if (!$this->canAccessDocument($user, $document)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $disk = Storage::disk('private')->exists($document->file_path)
+            ? 'private'
+            : (Storage::disk('public')->exists($document->file_path) ? 'public' : null);
+
+        if (!$disk) {
             return response()->json(['message' => 'File not found'], 404);
         }
 
-        return Storage::disk('public')->download($document->file_path, $document->name . '.' . pathinfo($document->file_path, PATHINFO_EXTENSION));
+        return Storage::disk($disk)->download($document->file_path, $document->name . '.' . pathinfo($document->file_path, PATHINFO_EXTENSION));
     }
 
     /**
@@ -232,11 +252,24 @@ class SharedDocumentController extends Controller
      */
     public function contactFiles(Request $request, $type, $id)
     {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
         $folderId = $request->get('folder_id'); // null for root
         
         $contactField = $type === 'client' ? 'client_id' : 'tc_id';
         $contactModel = $type === 'client' ? \App\Models\Client::class : \App\Models\TrainingCounsellor::class;
         $contact = $contactModel::where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+
+        if (!$this->canAccessContact($user, $type, $contact)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if ($folderId === 'private' && !$user->isStaff()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         if (!$folderId) {
             // Virtual Root - return the 3 main categories as "folders"
@@ -321,8 +354,13 @@ class SharedDocumentController extends Controller
     /**
      * Show a single document.
      */
-    public function showDocument(SharedDocument $document)
+    public function showDocument(Request $request, SharedDocument $document)
     {
+        $user = $request->user();
+        if (!$this->canAccessDocument($user, $document)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
         return response()->json($document->load('uploader:id,name', 'folder', 'client', 'tc'));
     }
 
@@ -365,10 +403,7 @@ class SharedDocumentController extends Controller
     public function show(Request $request, Folder $folder)
     {
         $user = $request->user();
-        $isStaff = in_array($user->role, ['super_admin', 'admin', 'staff', 'consultation_staff', 'compliance_officer']);
-        
-        // Basic permission check
-        if (!$isStaff && $folder->type === 'internal') {
+        if (!$this->canAccessFolder($user, $folder)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
         
@@ -390,6 +425,99 @@ class SharedDocumentController extends Controller
             'files' => $documents,
             'current_folder' => $folder->load(['parent', 'shares'])
         ]);
+    }
+
+    /**
+     * Check if user can access a document.
+     */
+    public function canAccessDocument(?User $user, SharedDocument $document): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        // Staff can access all documents
+        if ($user->isStaff()) {
+            return true;
+        }
+
+        // Private files are strictly staff-only
+        if ($document->category === 'private') {
+            return false;
+        }
+
+        // If uploaded by this user, they can access it
+        if ($document->uploaded_by === $user->id) {
+            return true;
+        }
+
+        // Check if inside a folder that is shared with the user
+        if ($document->folder_id) {
+            $folder = $document->folder;
+            if ($folder && $this->canAccessFolder($user, $folder)) {
+                return true;
+            }
+        }
+
+        // If associated with a counsellor (tc_id)
+        if ($document->tc_id && $user->role === 'counsellor') {
+            if ($user->training_counsellor_id === $document->tc_id && $document->category !== 'private') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if user can access contact files.
+     */
+    public function canAccessContact(?User $user, string $type, $contact): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        if ($user->isStaff()) {
+            return true;
+        }
+
+        if ($user->role === 'counsellor' && $type === 'tc') {
+            return (int) $user->training_counsellor_id === (int) $contact->id;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if user can access a folder.
+     */
+    public function canAccessFolder(?User $user, Folder $folder): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        if ($user->isStaff()) {
+            return true;
+        }
+
+        if ($folder->type === 'internal' || $folder->category === 'private') {
+            return false;
+        }
+
+        if ($folder->created_by === $user->id) {
+            return true;
+        }
+
+        return $folder->shares()->where(function ($q) use ($user) {
+            $q->where('target_type', 'all_trainees')
+              ->orWhere('target_type', 'all_qualified')
+              ->orWhere(function ($subq) use ($user) {
+                  $subq->where('target_type', 'individual_user')
+                       ->where('target_id', $user->id);
+              });
+        })->exists();
     }
 
     private function formatBytes($bytes, $precision = 2)

@@ -36,7 +36,6 @@ use Illuminate\Support\Facades\Route;
 // Public routes with stricter rate limiting
 Route::middleware('throttle:5,1')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->name('login');
-    Route::post('/register', [AuthController::class, 'register'])->middleware('maintenance');
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
@@ -113,6 +112,8 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/trainee-application/stage-two-submission', [TraineeApplicationController::class, 'handleStageTwoSubmission']);
     Route::get('/trainee-interview/slots', [TraineeApplicationController::class, 'getAvailableInterviewSlots']);
     Route::post('/trainee-interview/book', [TraineeApplicationController::class, 'bookInterview']);
+    Route::post('/trainee-applications/confirm-personal-therapy', [TraineeApplicationController::class, 'confirmPersonalTherapy']);
+    Route::post('/therapy-form/confirm', [TraineeApplicationController::class, 'confirmPersonalTherapy']);
     Route::post('/qualified-counsellor/submit', [TrainingCounsellorController::class, 'submitQualifiedForm']);
     Route::post('/submit-qualified-form', [TrainingCounsellorController::class, 'submitQualifiedForm']);
     Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument'])->middleware('throttle:60,1');
@@ -380,6 +381,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/unread-count', [MessageController::class, 'unreadCount']);
         Route::get('/staff-list', [MessageController::class, 'getStaffList']);
         Route::get('/{id}', [MessageController::class, 'show']);
+        Route::get('/{id}/attachment', [MessageController::class, 'downloadAttachment']);
         Route::post('/{id}/mark-read', [MessageController::class, 'markAsRead']);
         Route::post('/{id}/trash', [MessageController::class, 'trash']);
         Route::post('/{id}/restore', [MessageController::class, 'restore']);
@@ -405,9 +407,9 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     Route::get('/folders', [SharedDocumentController::class, 'index']);
     Route::get('/folders/{folder}', [SharedDocumentController::class, 'show']);
 
-    Route::get('/contacts/{type}/{id}/files', [SharedDocumentController::class, 'contactFiles']);
     Route::post('/shared-documents', [SharedDocumentController::class, 'store']);
     Route::get('/shared-documents/{document}/download', [SharedDocumentController::class, 'download']);
+    Route::get('/contacts/{type}/{id}/files', [SharedDocumentController::class, 'contactFiles']);
     
     Route::middleware('staff')->group(function () {
         Route::post('/folders', [SharedDocumentController::class, 'createFolder']);
