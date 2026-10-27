@@ -112,9 +112,6 @@ class IntakeFormController extends Controller
 
         try {
             $serviceType = $validated['service_type'] ?? null;
-            if (is_string($serviceType) && in_array(strtolower(trim($serviceType)), ['low-cost', 'low_cost', 'low cost'])) {
-                $serviceType = 'Low Cost';
-            }
             if (empty($serviceType) && !empty($validated['is_couples'])) {
                 $serviceType = 'Mid Range';
             }

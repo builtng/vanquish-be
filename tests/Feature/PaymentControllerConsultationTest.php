@@ -216,4 +216,42 @@ class PaymentControllerConsultationTest extends TestCase
             'model_id' => $upcoming['id'],
         ]);
     }
+
+    /**
+     * Item 7: When client has no service_type and no intake row,
+     * create payment intent returns 422 "Service not found for this client"
+     * and ignores any service_type passed in the request body.
+     */
+    public function test_payment_endpoint_rejects_client_without_service_type_and_creates_no_payment_intent(): void
+    {
+        $mock = Mockery::mock('overload:' . PaymentIntent::class);
+        $mock->shouldNotReceive('create');
+
+        $client = Client::create([
+            'client_id' => 'CL-NO-SRV',
+            'name' => 'No Service Client',
+            'email' => 'noservice@example.com',
+            'stage' => 'New',
+            'service_type' => null,
+        ]);
+
+        $slot = ConsultationSlot::create([
+            'consultation_datetime' => now()->addDays(2),
+            'status' => 'available',
+            'max_slots' => 1,
+            'booked_slots' => 0,
+        ]);
+
+        $response = $this->postJson('/api/payments/create-intent', [
+            'client_id' => $client->id,
+            'payment_type' => 'consultation',
+            'consultation_slot_id' => $slot->id,
+            'service_type' => 'Low Cost',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'Service not found for this client',
+        ]);
+    }
 }

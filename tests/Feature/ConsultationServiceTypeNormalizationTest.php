@@ -93,7 +93,7 @@ class ConsultationServiceTypeNormalizationTest extends TestCase
         $this->assertEquals('Low Cost', $client->fresh()->service_type);
     }
 
-    public function test_intake_form_submission_stores_service_type_as_low_cost(): void
+    public function test_intake_form_submission_preserves_submitted_service_type(): void
     {
         $payload = [
             'first_name' => 'Alice',
@@ -115,12 +115,12 @@ class ConsultationServiceTypeNormalizationTest extends TestCase
 
         $this->assertDatabaseHas('client_intake_forms', [
             'email' => 'alice@example.com',
-            'service_type' => 'Low Cost',
+            'service_type' => 'low-cost',
         ]);
 
         $this->assertDatabaseHas('clients', [
             'email' => 'alice@example.com',
-            'service_type' => 'Low Cost',
+            'service_type' => 'low-cost',
         ]);
     }
 }

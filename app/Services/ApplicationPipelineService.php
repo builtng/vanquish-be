@@ -352,7 +352,12 @@ class ApplicationPipelineService
     protected function sendAcceptanceAndPaperworkEmails(Model $application, ?string $inductionDate): void
     {
         $frontendUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/');
-        $therapyFormUrl = $frontendUrl . '/therapy-form?email=' . urlencode($application->email);
+        if ($application instanceof TraineeApplication) {
+            $therapyToken = \App\Models\PersonalTherapyToken::createFor($application);
+            $therapyFormUrl = $frontendUrl . '/therapy-form?token=' . urlencode($therapyToken->token);
+        } else {
+            $therapyFormUrl = $frontendUrl . '/therapy-form';
+        }
 
         if (empty($application->placement_response_token)) {
             $application->update(['placement_response_token' => Str::random(40)]);

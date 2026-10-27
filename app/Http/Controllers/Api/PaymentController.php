@@ -121,7 +121,11 @@ class PaymentController extends Controller
         $serviceType = $client->service_type;
         if (empty($serviceType)) {
             $intake = \App\Models\ClientIntakeForm::where('client_id', $client->id)->latest()->first();
-            $serviceType = $intake->service_type ?? $request->input('service_type') ?? 'Mid Range';
+            $serviceType = $intake?->service_type;
+        }
+
+        if (empty($serviceType)) {
+            return response()->json(['message' => 'Service not found for this client'], 422);
         }
 
         $setting = \App\Models\ServiceSetting::where('service_name', $serviceType)->first();

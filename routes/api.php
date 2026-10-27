@@ -112,6 +112,7 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/trainee-application/stage-two-submission', [TraineeApplicationController::class, 'handleStageTwoSubmission']);
     Route::get('/trainee-interview/slots', [TraineeApplicationController::class, 'getAvailableInterviewSlots']);
     Route::post('/trainee-interview/book', [TraineeApplicationController::class, 'bookInterview']);
+    Route::get('/therapy-form/{token}', [TraineeApplicationController::class, 'getTherapyFormByToken']);
     Route::post('/trainee-applications/confirm-personal-therapy', [TraineeApplicationController::class, 'confirmPersonalTherapy']);
     Route::post('/therapy-form/confirm', [TraineeApplicationController::class, 'confirmPersonalTherapy']);
     Route::post('/qualified-counsellor/submit', [TrainingCounsellorController::class, 'submitQualifiedForm']);

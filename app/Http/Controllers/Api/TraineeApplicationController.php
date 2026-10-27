@@ -258,7 +258,8 @@ class TraineeApplicationController extends Controller
         // TRIGGER EMAIL: If Accepted
         if ($validated['status'] === 'Accepted') {
             $frontendUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/');
-            $therapyFormUrl = $frontendUrl . '/therapy-form?email=' . urlencode($traineeApplication->email);
+            $therapyToken = \App\Models\PersonalTherapyToken::createFor($traineeApplication);
+            $therapyFormUrl = $frontendUrl . '/therapy-form?token=' . urlencode($therapyToken->token);
 
             if (empty($traineeApplication->placement_response_token)) {
                 $traineeApplication->update(['placement_response_token' => \Illuminate\Support\Str::random(40)]);
@@ -1211,13 +1212,51 @@ class TraineeApplicationController extends Controller
     }
 
     /**
+     * Check personal therapy token and return the trainee's first name only.
+     * Returns 422 if token is invalid, expired, or already used.
+     */
+    public function getTherapyFormByToken($token)
+    {
+        $tokenRecord = \App\Models\PersonalTherapyToken::findValid($token);
+
+        if (!$tokenRecord || !$tokenRecord->traineeApplication) {
+            return response()->json([
+                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success'    => true,
+            'first_name' => $tokenRecord->traineeApplication->first_name,
+        ]);
+    }
+
+    /**
      * Internal confirmation of personal therapy for a trainee application.
      * Automatically ticks therapy_form on the matching TraineeApplication and records audit logs.
+     * Requires a valid, unused, and unexpired token; ignores any trainee email in the request.
      */
     public function confirmPersonalTherapy(Request $request)
     {
+        $token = $request->input('token');
+        if (empty($token) || !is_string($token)) {
+            return response()->json([
+                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
+            ], 422);
+        }
+
+        $tokenRecord = \App\Models\PersonalTherapyToken::findValid($token);
+        if (!$tokenRecord || !$tokenRecord->traineeApplication) {
+            return response()->json([
+                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
+            ], 422);
+        }
+
+        $trainee = $tokenRecord->traineeApplication;
+
         $validated = $request->validate([
-            'trainee_email'     => 'required|email|max:255',
+            'token'             => 'required',
+            'trainee_email'     => 'nullable',
             'trainee_name'      => 'nullable|string|max:255',
             'therapist_name'    => 'required|string|max:255',
             'therapist_email'   => 'required|email|max:255',
@@ -1231,71 +1270,65 @@ class TraineeApplicationController extends Controller
             'signature'         => 'required|string|max:255',
         ]);
 
-        $email = strtolower(trim($validated['trainee_email']));
-        $trainee = TraineeApplication::whereRaw('LOWER(email) = ?', [$email])->first();
-
         $now = now()->toIso8601String();
         $tickedBy = "Therapist: {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})";
 
-        if ($trainee) {
-            $onboarding = is_array($trainee->onboarding_data) 
-                ? $trainee->onboarding_data 
-                : ['checklist' => []];
+        $onboarding = is_array($trainee->onboarding_data) 
+            ? $trainee->onboarding_data 
+            : ['checklist' => []];
 
-            $onboarding['checklist']['therapy_form'] = true;
+        $onboarding['checklist']['therapy_form'] = true;
 
-            if (!isset($onboarding['checklist_meta'])) {
-                $onboarding['checklist_meta'] = [];
-            }
+        if (!isset($onboarding['checklist_meta'])) {
+            $onboarding['checklist_meta'] = [];
+        }
 
-            $onboarding['checklist_meta']['therapy_form'] = [
-                'status'            => true,
-                'ticked_by'         => $tickedBy,
-                'ticked_at'         => $now,
+        $onboarding['checklist_meta']['therapy_form'] = [
+            'status'            => true,
+            'ticked_by'         => $tickedBy,
+            'ticked_at'         => $now,
+            'source'            => 'internal_form',
+            'therapist_name'    => $validated['therapist_name'],
+            'therapist_email'   => $validated['therapist_email'],
+            'therapist_phone'   => $validated['therapist_phone'] ?? null,
+            'professional_body' => $validated['professional_body'],
+            'membership_number' => $validated['membership_number'],
+            'therapy_modality'  => $validated['therapy_modality'] ?? null,
+            'therapy_frequency' => $validated['therapy_frequency'] ?? null,
+            'start_date'        => $validated['start_date'] ?? null,
+            'signature'         => $validated['signature'],
+        ];
+
+        $onboarding['history'][] = [
+            'action'            => 'paperwork_therapy_form_auto_ticked',
+            'status'            => true,
+            'at'                => $now,
+            'source'            => 'internal_form',
+            'therapist_name'    => $validated['therapist_name'],
+        ];
+
+        $trainee->update(['onboarding_data' => $onboarding]);
+
+        \App\Models\ActivityLog::create([
+            'model_type'  => TraineeApplication::class,
+            'model_id'    => $trainee->id,
+            'action'      => 'paperwork_therapy_form_auto_ticked',
+            'description' => "Personal therapy confirmed internally for {$trainee->first_name} {$trainee->last_name} by therapist {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})",
+            'changes'     => [
                 'source'            => 'internal_form',
                 'therapist_name'    => $validated['therapist_name'],
                 'therapist_email'   => $validated['therapist_email'],
-                'therapist_phone'   => $validated['therapist_phone'] ?? null,
                 'professional_body' => $validated['professional_body'],
                 'membership_number' => $validated['membership_number'],
-                'therapy_modality'  => $validated['therapy_modality'] ?? null,
-                'therapy_frequency' => $validated['therapy_frequency'] ?? null,
-                'start_date'        => $validated['start_date'] ?? null,
-                'signature'         => $validated['signature'],
-            ];
+                'ticked_at'         => $now,
+            ],
+            'user_id'     => optional($request->user())->id,
+        ]);
 
-            $onboarding['history'][] = [
-                'action'            => 'paperwork_therapy_form_auto_ticked',
-                'status'            => true,
-                'at'                => $now,
-                'source'            => 'internal_form',
-                'therapist_name'    => $validated['therapist_name'],
-            ];
-
-            $trainee->update(['onboarding_data' => $onboarding]);
-
-            \App\Models\ActivityLog::create([
-                'model_type'  => TraineeApplication::class,
-                'model_id'    => $trainee->id,
-                'action'      => 'paperwork_therapy_form_auto_ticked',
-                'description' => "Personal therapy confirmed internally for {$trainee->first_name} {$trainee->last_name} by therapist {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})",
-                'changes'     => [
-                    'source'            => 'internal_form',
-                    'therapist_name'    => $validated['therapist_name'],
-                    'therapist_email'   => $validated['therapist_email'],
-                    'professional_body' => $validated['professional_body'],
-                    'membership_number' => $validated['membership_number'],
-                    'ticked_at'         => $now,
-                ],
-                'user_id'     => optional($request->user())->id,
-            ]);
-        }
+        $tokenRecord->markAsUsed();
 
         return response()->json([
-            'success'             => true,
-            'message'             => 'Personal therapy confirmation has been successfully submitted and verified.',
-            'matched_application' => $trainee ? true : false,
-            'trainee_name'        => $trainee ? ($trainee->first_name . ' ' . $trainee->last_name) : ($validated['trainee_name'] ?? null),
+            'success' => true,
         ]);
     }
 }
