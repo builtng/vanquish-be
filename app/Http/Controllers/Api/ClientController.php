@@ -1537,8 +1537,7 @@ class ClientController extends Controller
      */
     private function getStorageUrl(Request $request, $path)
     {
-        $baseUrl = $request->getSchemeAndHttpHost();
-        return $baseUrl . '/storage/' . $path;
+        return \App\Support\PublicStorageUrl::for($path);
     }
 
     /**

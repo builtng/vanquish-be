@@ -1652,12 +1652,7 @@ class TrainingCounsellorController extends Controller
      */
     private function getStorageUrl(Request $request, $path)
     {
-        if (!$path) return null;
-        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-            return $path;
-        }
-        $baseUrl = $request->getSchemeAndHttpHost();
-        return $baseUrl . '/storage/' . ltrim($path, '/');
+        return \App\Support\PublicStorageUrl::for($path);
     }
 
     /**

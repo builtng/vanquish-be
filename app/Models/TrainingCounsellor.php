@@ -154,16 +154,7 @@ class TrainingCounsellor extends Model
      */
     public function getPhotoUrlAttribute()
     {
-        if (!$this->photo) {
-            return null;
-        }
-
-        if (str_starts_with($this->photo, 'http://') || str_starts_with($this->photo, 'https://')) {
-            return $this->photo;
-        }
-
-        $appUrl = rtrim(config('app.url'), '/');
-        return $appUrl . '/storage/' . ltrim($this->photo, '/');
+        return \App\Support\PublicStorageUrl::for($this->photo);
     }
 
     /**
