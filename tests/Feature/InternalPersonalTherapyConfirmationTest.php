@@ -47,19 +47,58 @@ class InternalPersonalTherapyConfirmationTest extends TestCase
     }
 
     /**
-     * Requirement: No token in POST returns 422 with exact invalid message.
+     * Requirement: The open /therapy-form link (no token) needs the trainee email.
      */
-    public function test_no_token_returns_422(): void
+    public function test_no_token_without_trainee_email_returns_422(): void
     {
+        $this->createTrainee();
         $payload = $this->validTherapistPayload('');
         unset($payload['token']);
 
         $response = $this->postJson('/api/trainee-applications/confirm-personal-therapy', $payload);
 
-        $response->assertStatus(422)
-            ->assertJson([
-                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
-            ]);
+        $response->assertStatus(422)->assertJsonValidationErrors(['trainee_email']);
+    }
+
+    /**
+     * Requirement: The open /therapy-form link (no token) matches the trainee by email,
+     * the same way the old JotForm webhook did, and ticks the checklist.
+     */
+    public function test_no_token_matches_trainee_by_email_and_ticks_therapy_form(): void
+    {
+        $alice = $this->createTrainee(['email' => 'Alice.Smith@example.com']);
+        $bob = $this->createTrainee(['email' => 'bob@example.com']);
+
+        $payload = $this->validTherapistPayload('', [
+            'trainee_name' => 'Alice Smith',
+            'trainee_email' => 'alice.smith@EXAMPLE.com',
+        ]);
+        unset($payload['token']);
+
+        $response = $this->postJson('/api/therapy-form/confirm', $payload);
+        $response->assertStatus(200)->assertExactJson(['success' => true]);
+
+        $alice->refresh();
+        $bob->refresh();
+
+        $this->assertTrue($alice->onboarding_data['checklist']['therapy_form']);
+        $this->assertSame('internal_form_open_link', $alice->onboarding_data['checklist_meta']['therapy_form']['source']);
+        $this->assertFalse($alice->onboarding_data['checklist_meta']['therapy_form']['verified_by_token']);
+        $this->assertFalse($bob->onboarding_data['checklist']['therapy_form']);
+    }
+
+    /**
+     * Requirement: The open link rejects an email that has no trainee application.
+     */
+    public function test_no_token_with_unknown_trainee_email_returns_422(): void
+    {
+        $this->createTrainee();
+        $payload = $this->validTherapistPayload('', ['trainee_email' => 'nobody@example.com']);
+        unset($payload['token']);
+
+        $response = $this->postJson('/api/trainee-applications/confirm-personal-therapy', $payload);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['trainee_email']);
     }
 
     /**
