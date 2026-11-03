@@ -236,6 +236,8 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/qc-applications/{id}/induction-invite', [QcApplicationController::class, 'sendInductionInvite']);
         Route::post('/qc-applications/{id}/induction-attendance', [QcApplicationController::class, 'recordInductionAttendance']);
         Route::match(['POST', 'PUT'], '/qc-applications/{id}/status', [QcApplicationController::class, 'updateStatus']);
+        Route::post('/qc-applications/{id}/portal-invite', [QcApplicationController::class, 'sendPortalInvite']);
+        Route::post('/qc-applications/{id}/finalize', [QcApplicationController::class, 'finalizePlacement']);
     });
 
     // Consultations (staff and admin only)

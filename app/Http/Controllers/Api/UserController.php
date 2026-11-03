@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\TrainingCounsellor;
 use App\Models\User;
 use App\Models\ActivityLog;
 use Illuminate\Http\Request;
@@ -11,6 +12,84 @@ use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
+    /**
+     * Roles an admin can pick on the Users screen. The two counsellor choices are stored
+     * as role "counsellor" linked to a practitioner record of the matching counsellor_type.
+     */
+    private const ROLE_CHOICES = ['admin', 'staff', 'trainee_counsellor', 'qualified_counsellor'];
+
+    private const COUNSELLOR_ROLE_TYPES = [
+        'trainee_counsellor' => 'Trainee',
+        'qualified_counsellor' => 'Qualified',
+    ];
+
+    /**
+     * Shape a user for the admin Users screen, including which kind of counsellor they are.
+     */
+    private function presentUser(User $user): array
+    {
+        $type = $user->role === 'counsellor' ? $user->trainingCounsellor?->counsellor_type : null;
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role,
+            'role_choice' => $type === 'Qualified'
+                ? 'qualified_counsellor'
+                : ($user->role === 'counsellor' ? 'trainee_counsellor' : $user->role),
+            'counsellor_type' => $user->role === 'counsellor' ? ($type ?? 'Trainee') : null,
+            'practitioner_id' => $user->trainingCounsellor?->tc_id,
+            'is_active' => (bool) $user->is_active,
+            'deactivated_at' => $user->deactivated_at,
+            'two_factor_enabled' => (bool) $user->two_factor_enabled,
+            'created_at' => $user->created_at,
+            'updated_at' => $user->updated_at,
+        ];
+    }
+
+    /**
+     * Find the active practitioner with this email, or create one of the given type.
+     */
+    private function findOrCreatePractitioner(string $name, string $email, string $counsellorType): TrainingCounsellor
+    {
+        $practitioner = TrainingCounsellor::whereNull('archived_at')->where('email', $email)->first();
+
+        if ($practitioner) {
+            $practitioner->update(['counsellor_type' => $counsellorType]);
+            return $practitioner;
+        }
+
+        $person = \App\Models\Person::findOrCreateByEmail($email, $name, null);
+
+        return TrainingCounsellor::create([
+            'person_id' => $person->id,
+            'tc_id' => $counsellorType === 'Qualified'
+                ? $this->nextQualifiedId()
+                : TrainingCounsellor::generateUniqueTcId(),
+            'name' => $name,
+            'email' => $email,
+            'counsellor_type' => $counsellorType,
+            'status' => 'Active',
+            'joined_date' => now(),
+            'last_activity' => now(),
+        ]);
+    }
+
+    /**
+     * Next QC### practitioner id, matching how accepted QC applications are numbered.
+     */
+    private function nextQualifiedId(): string
+    {
+        $max = TrainingCounsellor::withTrashed()
+            ->where('tc_id', 'LIKE', 'QC%')
+            ->pluck('tc_id')
+            ->map(fn ($id) => (int) substr($id, 2))
+            ->max();
+
+        return 'QC' . str_pad(max(1, ($max ?? 0) + 1), 3, '0', STR_PAD_LEFT);
+    }
+
     /**
      * Display a listing of users (admin only)
      */
@@ -21,9 +100,11 @@ class UserController extends Controller
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
-        $users = User::select('id', 'name', 'email', 'role', 'is_active', 'deactivated_at', 'two_factor_enabled', 'created_at', 'updated_at')
+        $users = User::select('id', 'name', 'email', 'role', 'training_counsellor_id', 'is_active', 'deactivated_at', 'two_factor_enabled', 'created_at', 'updated_at')
+            ->with('trainingCounsellor:id,tc_id,counsellor_type')
             ->orderBy('id', 'desc')
-            ->get();
+            ->get()
+            ->map(fn (User $user) => $this->presentUser($user));
 
         return response()->json($users);
     }
@@ -50,17 +131,24 @@ class UserController extends Controller
                 'regex:/[A-Z]/',
                 'regex:/[0-9]/',
             ],
-            'role' => 'required|string|in:admin,staff',
+            'role' => 'required|string|in:' . implode(',', self::ROLE_CHOICES),
         ], [
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
             'password.min' => 'Password must be at least 12 characters.',
         ]);
 
+        $email = strtolower(trim($validated['email']));
+        $counsellorType = self::COUNSELLOR_ROLE_TYPES[$validated['role']] ?? null;
+        $practitioner = $counsellorType
+            ? $this->findOrCreatePractitioner($validated['name'], $email, $counsellorType)
+            : null;
+
         $user = User::create([
             'name' => $validated['name'],
-            'email' => strtolower(trim($validated['email'])),
+            'email' => $email,
             'password' => Hash::make($validated['password']),
-            'role' => $validated['role'],
+            'role' => $counsellorType ? 'counsellor' : $validated['role'],
+            'training_counsellor_id' => $practitioner?->id,
             'is_active' => true,
         ]);
 
@@ -77,13 +165,7 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'User created successfully',
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'is_active' => (bool) $user->is_active,
-            ],
+            'user' => $this->presentUser($user->fresh('trainingCounsellor')),
         ], 201);
     }
 
@@ -118,7 +200,7 @@ class UserController extends Controller
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255|regex:/^[a-zA-Z\s\-\'\.]+$/',
             'email' => 'sometimes|email|unique:users,email,' . $id,
-            'role' => 'sometimes|string|in:admin,staff',
+            'role' => 'sometimes|string|in:' . implode(',', self::ROLE_CHOICES),
             'password' => [
                 'sometimes',
                 'string',
@@ -143,6 +225,29 @@ class UserController extends Controller
             $validated['password'] = Hash::make($validated['password']);
         }
 
+        if (isset($validated['role']) && isset(self::COUNSELLOR_ROLE_TYPES[$validated['role']])) {
+            $counsellorType = self::COUNSELLOR_ROLE_TYPES[$validated['role']];
+            $practitioner = $user->training_counsellor_id
+                ? TrainingCounsellor::find($user->training_counsellor_id)
+                : null;
+
+            if ($practitioner) {
+                $practitioner->update(['counsellor_type' => $counsellorType]);
+            } else {
+                $practitioner = $this->findOrCreatePractitioner(
+                    $validated['name'] ?? $user->name,
+                    strtolower(trim($validated['email'] ?? $user->email)),
+                    $counsellorType
+                );
+            }
+
+            $validated['role'] = 'counsellor';
+            $validated['training_counsellor_id'] = $practitioner->id;
+        } elseif (isset($validated['role'])) {
+            // Moving a counsellor to a staff role removes the practitioner link from the login.
+            $validated['training_counsellor_id'] = null;
+        }
+
         $user->update($validated);
 
         // Log activity
@@ -160,13 +265,7 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'User updated successfully',
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'is_active' => (bool) $user->is_active,
-            ],
+            'user' => $this->presentUser($user->fresh('trainingCounsellor')),
         ]);
     }
 

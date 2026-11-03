@@ -178,63 +178,7 @@ class QcApplicationController extends Controller
             ], 409);
         }
 
-        // Generate unique QC id
-        $maxQc = TrainingCounsellor::withTrashed()
-            ->where('tc_id', 'LIKE', 'QC%')
-            ->get()
-            ->map(function ($c) {
-                return (int) substr($c->tc_id, 2);
-            })
-            ->max();
-        $nextQc = max(1, ($maxQc ?? 0) + 1);
-        $qcId = 'QC' . str_pad($nextQc, 3, '0', STR_PAD_LEFT);
-
-        $answers = $qcApp->answers ?? [];
-        $regAddress = $answers['registered_address'] ?? null;
-        $regCity = $answers['registered_city'] ?? null;
-        $regPostcode = $answers['registered_postcode'] ?? null;
-        $fullAddress = trim(($regAddress ?? '') . ', ' . ($regCity ?? '') . ' ' . ($regPostcode ?? ''));
-
-        $tc = TrainingCounsellor::create([
-            'person_id' => $qcApp->person_id,
-            'uuid' => (string) Str::uuid(),
-            'tc_id' => $qcId,
-            'name' => $qcApp->name,
-            'legal_first_name' => $qcApp->legal_first_name,
-            'legal_last_name' => $qcApp->legal_last_name,
-            'email' => $qcApp->email,
-            'phone' => $qcApp->phone ?? ($answers['phone'] ?? null),
-            'address' => $fullAddress,
-            'registered_address' => $regAddress,
-            'registered_city' => $regCity,
-            'registered_postcode' => $regPostcode,
-            'has_supervisor' => $answers['has_supervisor'] ?? null,
-            'previous_vanquish_work' => $answers['previous_vanquish_work'] ?? null,
-            'areas_to_improve' => $answers['areas_to_improve'] ?? null,
-            'unique_trait' => $answers['unique_trait'] ?? null,
-            'counsellor_training_details' => $answers['counsellor_training_details'] ?? null,
-            'qualified_to_work_with' => $answers['qualified_to_work_with'] ?? [],
-            'challenging_cases' => $answers['challenging_cases'] ?? null,
-            'qualification_document' => $qcApp->qualification_document,
-            'dbs_certificate_qualified' => $qcApp->dbs_certificate_qualified,
-            'insurance_qualified' => $qcApp->insurance_qualified,
-            'self_employment_proof' => $qcApp->self_employment_proof,
-            'professional_membership' => $qcApp->professional_membership,
-            'signature' => $qcApp->signature,
-            'signature_date' => $qcApp->signature_date,
-            'gender' => $answers['gender'] ?? null,
-            'ethnicity' => $answers['ethnicity'] ?? null,
-            'sexual_orientation' => $answers['sexual_orientation'] ?? null,
-            'date_of_birth' => $answers['date_of_birth'] ?? null,
-            'modality' => is_array($answers['modalities'] ?? null) ? implode(', ', $answers['modalities']) : ($answers['modalities'] ?? null),
-            'topics_with_experience' => $answers['experience_areas'] ?? [],
-            'availability' => $answers['availability'] ?? null,
-            'qualified_form_completed' => true,
-            'counsellor_type' => 'Qualified',
-            'status' => 'Active',
-            'joined_date' => now(),
-            'last_activity' => now(),
-        ]);
+        $tc = $this->createQualifiedPractitioner($qcApp);
 
         // Manage User account
         $user = User::where('email', $qcApp->email)->first();
@@ -295,6 +239,196 @@ class QcApplicationController extends Controller
             'application' => $qcApp->fresh(),
             'user_note' => $userMessage,
         ]);
+    }
+
+    /**
+     * Create the Qualified practitioner (TrainingCounsellor, counsellor_type = Qualified)
+     * from a QC application. Shared by accept() and sendPortalInvite().
+     */
+    protected function createQualifiedPractitioner(QcApplication $qcApp): TrainingCounsellor
+    {
+        // Generate unique QC id
+        $maxQc = TrainingCounsellor::withTrashed()
+            ->where('tc_id', 'LIKE', 'QC%')
+            ->get()
+            ->map(function ($c) {
+                return (int) substr($c->tc_id, 2);
+            })
+            ->max();
+        $nextQc = max(1, ($maxQc ?? 0) + 1);
+        $qcId = 'QC' . str_pad($nextQc, 3, '0', STR_PAD_LEFT);
+
+        $answers = $qcApp->answers ?? [];
+        $regAddress = $answers['registered_address'] ?? null;
+        $regCity = $answers['registered_city'] ?? null;
+        $regPostcode = $answers['registered_postcode'] ?? null;
+        $fullAddress = trim(($regAddress ?? '') . ', ' . ($regCity ?? '') . ' ' . ($regPostcode ?? ''));
+
+        return TrainingCounsellor::create([
+            'person_id' => $qcApp->person_id,
+            'uuid' => (string) Str::uuid(),
+            'tc_id' => $qcId,
+            'name' => $qcApp->name,
+            'legal_first_name' => $qcApp->legal_first_name,
+            'legal_last_name' => $qcApp->legal_last_name,
+            'email' => $qcApp->email,
+            'phone' => $qcApp->phone ?? ($answers['phone'] ?? null),
+            'address' => $fullAddress,
+            'registered_address' => $regAddress,
+            'registered_city' => $regCity,
+            'registered_postcode' => $regPostcode,
+            'has_supervisor' => $answers['has_supervisor'] ?? null,
+            'previous_vanquish_work' => $answers['previous_vanquish_work'] ?? null,
+            'areas_to_improve' => $answers['areas_to_improve'] ?? null,
+            'unique_trait' => $answers['unique_trait'] ?? null,
+            'counsellor_training_details' => $answers['counsellor_training_details'] ?? null,
+            'qualified_to_work_with' => $answers['qualified_to_work_with'] ?? [],
+            'challenging_cases' => $answers['challenging_cases'] ?? null,
+            'qualification_document' => $qcApp->qualification_document,
+            'dbs_certificate_qualified' => $qcApp->dbs_certificate_qualified,
+            'insurance_qualified' => $qcApp->insurance_qualified,
+            'self_employment_proof' => $qcApp->self_employment_proof,
+            'professional_membership' => $qcApp->professional_membership,
+            'signature' => $qcApp->signature,
+            'signature_date' => $qcApp->signature_date,
+            'gender' => $answers['gender'] ?? null,
+            'ethnicity' => $answers['ethnicity'] ?? null,
+            'sexual_orientation' => $answers['sexual_orientation'] ?? null,
+            'date_of_birth' => $answers['date_of_birth'] ?? null,
+            'modality' => is_array($answers['modalities'] ?? null) ? implode(', ', $answers['modalities']) : ($answers['modalities'] ?? null),
+            'topics_with_experience' => $answers['experience_areas'] ?? [],
+            'availability' => $answers['availability'] ?? null,
+            'qualified_form_completed' => true,
+            'counsellor_type' => 'Qualified',
+            'status' => 'Active',
+            'joined_date' => now(),
+            'last_activity' => now(),
+        ]);
+    }
+
+    /**
+     * Grant portal access to an accepted Qualified Counsellor applicant, the same way
+     * trainee applications do: find or create the Qualified practitioner record, find or
+     * create the counsellor login, email the portal invitation and move the application
+     * to Onboarding.
+     */
+    public function sendPortalInvite(Request $request, $id)
+    {
+        $qcApp = is_numeric($id)
+            ? QcApplication::findOrFail($id)
+            : QcApplication::where('uuid', $id)->firstOrFail();
+
+        if ($qcApp->status === 'Rejected' || !empty($qcApp->archived_at)) {
+            return response()->json([
+                'message' => 'This application was rejected. Restore it before granting portal access.',
+            ], 422);
+        }
+
+        if (empty($qcApp->email)) {
+            return response()->json(['message' => 'This application has no email address.'], 422);
+        }
+
+        $email = strtolower(trim($qcApp->email));
+
+        // 1. Practitioner record: the one already linked, an active one with this email, or a new Qualified one.
+        $tc = $qcApp->training_counsellor_id
+            ? TrainingCounsellor::whereNull('archived_at')->find($qcApp->training_counsellor_id)
+            : null;
+        if (!$tc) {
+            $tc = TrainingCounsellor::whereNull('archived_at')->where('email', $email)->first();
+        }
+        if (!$tc) {
+            $tc = $this->createQualifiedPractitioner($qcApp);
+        }
+
+        // 2. Login account (role = counsellor). Staff and admin accounts are never downgraded.
+        $user = User::where('email', $email)->first();
+        $temporaryPassword = null;
+
+        if ($user && in_array($user->role, ['admin', 'staff', 'super_admin', 'consultation_staff', 'compliance_officer'])) {
+            return response()->json([
+                'message' => "This email already belongs to a {$user->role} account, so a counsellor login was not created.",
+            ], 409);
+        }
+
+        if (!$user) {
+            $temporaryPassword = Str::random(10) . '!1Aa';
+            User::create([
+                'name' => $tc->name,
+                'email' => $email,
+                'password' => Hash::make($temporaryPassword),
+                'role' => 'counsellor',
+                'training_counsellor_id' => $tc->id,
+            ]);
+        } else {
+            $user->update([
+                'role' => 'counsellor',
+                'training_counsellor_id' => $tc->id,
+            ]);
+        }
+
+        // 3. Portal invitation email.
+        $portalUrl = rtrim(config('app.frontend_url') ?: 'https://vqtmanagement.com', '/') . '/counsellor-login';
+        app(\App\Services\EmailService::class)->sendAndLog($email, 'counsellor_portal_invite', [
+            'first_name' => $qcApp->first_name ?: (explode(' ', (string) $tc->name)[0] ?? $tc->name),
+            'portal_link' => $portalUrl,
+            'email' => $email,
+            'temporary_password' => $temporaryPassword ?? '(use your existing password)',
+        ], $qcApp);
+
+        // 4. Application: Onboarding, linked practitioner, portal access recorded.
+        $onboarding = is_array($qcApp->onboarding_data) ? $qcApp->onboarding_data : [];
+        $onboarding['portal_access_granted'] = true;
+        $onboarding['portal_invite_sent_at'] = now()->toIso8601String();
+        $onboarding['checklist']['portal_setup'] = true;
+
+        $qcApp->update([
+            'status' => 'Onboarding',
+            'training_counsellor_id' => $tc->id,
+            'onboarding_data' => $onboarding,
+        ]);
+
+        ActivityLog::create([
+            'user_id' => optional($request->user())->id,
+            'action' => 'qc_portal_invite_sent',
+            'model_type' => QcApplication::class,
+            'model_id' => $qcApp->id,
+            'description' => "Portal access granted to {$qcApp->name} ({$tc->tc_id}). Invitation emailed.",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'message' => 'Portal invitation sent.',
+            'account_created' => $temporaryPassword !== null,
+            'application' => $qcApp->fresh(),
+        ]);
+    }
+
+    /**
+     * Finalise a Qualified Counsellor placement (same as trainee "Make Active Placement").
+     */
+    public function finalizePlacement(Request $request, $id)
+    {
+        $qcApp = is_numeric($id)
+            ? QcApplication::findOrFail($id)
+            : QcApplication::where('uuid', $id)->firstOrFail();
+
+        if (empty($qcApp->onboarding_data['portal_access_granted'])) {
+            return response()->json(['message' => 'Grant portal access before making this an active placement.'], 422);
+        }
+
+        $qcApp->update(['status' => 'Active Placement']);
+
+        ActivityLog::create([
+            'user_id' => optional($request->user())->id,
+            'action' => 'qc_active_placement',
+            'model_type' => QcApplication::class,
+            'model_id' => $qcApp->id,
+            'description' => "{$qcApp->name} is now an ACTIVE PLACEMENT",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json(['message' => 'Qualified counsellor is now ACTIVE', 'application' => $qcApp->fresh()]);
     }
 
     /**
