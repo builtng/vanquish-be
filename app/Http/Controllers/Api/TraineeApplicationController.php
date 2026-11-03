@@ -1234,29 +1234,36 @@ class TraineeApplicationController extends Controller
     /**
      * Internal confirmation of personal therapy for a trainee application.
      * Automatically ticks therapy_form on the matching TraineeApplication and records audit logs.
-     * Requires a valid, unused, and unexpired token; ignores any trainee email in the request.
+     *
+     * Two ways in:
+     *  - Tokenised link (sent in the acceptance / paperwork emails): the trainee is resolved
+     *    strictly from the single-use token and any trainee email in the request is ignored.
+     *    A token that is supplied but unknown, expired or already used is rejected.
+     *  - Open link (/therapy-form with no token, the same as the old JotForm): the trainee is
+     *    matched on the trainee email typed into the form, exactly as the JotForm webhook did.
      */
     public function confirmPersonalTherapy(Request $request)
     {
+        $invalidLinkMessage = 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.';
+
         $token = $request->input('token');
-        if (empty($token) || !is_string($token)) {
-            return response()->json([
-                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
-            ], 422);
+        $hasToken = is_string($token) && trim($token) !== '';
+        $tokenRecord = null;
+
+        if ($token !== null && !is_string($token)) {
+            return response()->json(['message' => $invalidLinkMessage], 422);
         }
 
-        $tokenRecord = \App\Models\PersonalTherapyToken::findValid($token);
-        if (!$tokenRecord || !$tokenRecord->traineeApplication) {
-            return response()->json([
-                'message' => 'This link is no longer valid. Please contact help@vanquishtherapies.co.uk.',
-            ], 422);
+        if ($hasToken) {
+            $tokenRecord = \App\Models\PersonalTherapyToken::findValid($token);
+            if (!$tokenRecord || !$tokenRecord->traineeApplication) {
+                return response()->json(['message' => $invalidLinkMessage], 422);
+            }
         }
-
-        $trainee = $tokenRecord->traineeApplication;
 
         $validated = $request->validate([
-            'token'             => 'required',
-            'trainee_email'     => 'nullable',
+            'token'             => 'nullable|string',
+            'trainee_email'     => $hasToken ? 'nullable' : 'required|email|max:255',
             'trainee_name'      => 'nullable|string|max:255',
             'therapist_name'    => 'required|string|max:255',
             'therapist_email'   => 'required|email|max:255',
@@ -1269,6 +1276,24 @@ class TraineeApplicationController extends Controller
             'confirmed'         => 'required',
             'signature'         => 'required|string|max:255',
         ]);
+
+        if ($tokenRecord) {
+            $trainee = $tokenRecord->traineeApplication;
+        } else {
+            $email = strtolower(trim($validated['trainee_email']));
+            $trainee = TraineeApplication::whereRaw('LOWER(email) = ?', [$email])
+                ->orderByDesc('id')
+                ->first();
+
+            if (!$trainee) {
+                return response()->json([
+                    'message' => 'We could not find a trainee counsellor application for that email address. Please use the email address the trainee applied with, or contact help@vanquishtherapies.co.uk.',
+                    'errors'  => ['trainee_email' => ['No trainee application found for this email address.']],
+                ], 422);
+            }
+        }
+
+        $source = $tokenRecord ? 'internal_form' : 'internal_form_open_link';
 
         $now = now()->toIso8601String();
         $tickedBy = "Therapist: {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})";
@@ -1287,7 +1312,8 @@ class TraineeApplicationController extends Controller
             'status'            => true,
             'ticked_by'         => $tickedBy,
             'ticked_at'         => $now,
-            'source'            => 'internal_form',
+            'source'            => $source,
+            'verified_by_token' => (bool) $tokenRecord,
             'therapist_name'    => $validated['therapist_name'],
             'therapist_email'   => $validated['therapist_email'],
             'therapist_phone'   => $validated['therapist_phone'] ?? null,
@@ -1303,7 +1329,7 @@ class TraineeApplicationController extends Controller
             'action'            => 'paperwork_therapy_form_auto_ticked',
             'status'            => true,
             'at'                => $now,
-            'source'            => 'internal_form',
+            'source'            => $source,
             'therapist_name'    => $validated['therapist_name'],
         ];
 
@@ -1315,7 +1341,7 @@ class TraineeApplicationController extends Controller
             'action'      => 'paperwork_therapy_form_auto_ticked',
             'description' => "Personal therapy confirmed internally for {$trainee->first_name} {$trainee->last_name} by therapist {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})",
             'changes'     => [
-                'source'            => 'internal_form',
+                'source'            => $source,
                 'therapist_name'    => $validated['therapist_name'],
                 'therapist_email'   => $validated['therapist_email'],
                 'professional_body' => $validated['professional_body'],
@@ -1325,7 +1351,9 @@ class TraineeApplicationController extends Controller
             'user_id'     => optional($request->user())->id,
         ]);
 
-        $tokenRecord->markAsUsed();
+        if ($tokenRecord) {
+            $tokenRecord->markAsUsed();
+        }
 
         return response()->json([
             'success' => true,
