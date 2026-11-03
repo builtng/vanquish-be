@@ -54,6 +54,16 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    /*
+    | Public base URL for files on the "public" storage disk, e.g.
+    | https://api.vqtmanagement.com/storage. When empty, links use the host of
+    | the API request (see App\Support\PublicStorageUrl).
+    */
+    'storage_url' => env('STORAGE_URL'),
+
+    // Every website address (FRONTEND_URL may list several, comma separated).
+    'frontend_urls' => array_values(array_filter(array_map('trim', explode(',', env('FRONTEND_URL', env('APP_BASE_URL', 'http://localhost:3000')))))),
+
     'frontend_url' => explode(',', env('FRONTEND_URL', env('APP_BASE_URL', 'http://localhost:3000')))[0],
 
     /*
