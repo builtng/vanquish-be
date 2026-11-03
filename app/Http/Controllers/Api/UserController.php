@@ -16,7 +16,31 @@ class UserController extends Controller
      * Roles an admin can pick on the Users screen. The two counsellor choices are stored
      * as role "counsellor" linked to a practitioner record of the matching counsellor_type.
      */
-    private const ROLE_CHOICES = ['admin', 'staff', 'trainee_counsellor', 'qualified_counsellor'];
+    private const ROLE_CHOICES = [
+        'super_admin',
+        'admin',
+        'staff',
+        'consultation_staff',
+        'compliance_officer',
+        'trainee_counsellor',
+        'qualified_counsellor',
+    ];
+
+    /**
+     * Only a Super Admin may create a Super Admin, or change or remove an existing one.
+     */
+    private function guardSuperAdmin(Request $request, ?User $target, ?string $requestedRole)
+    {
+        if ($request->user()->role === 'super_admin') {
+            return null;
+        }
+
+        if ($requestedRole === 'super_admin' || ($target && $target->role === 'super_admin')) {
+            return response()->json(['message' => 'Only a Super Admin can create or change a Super Admin account.'], 403);
+        }
+
+        return null;
+    }
 
     private const COUNSELLOR_ROLE_TYPES = [
         'trainee_counsellor' => 'Trainee',
@@ -96,7 +120,7 @@ class UserController extends Controller
     public function index(Request $request)
     {
         // Only admin can view users
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
@@ -115,7 +139,7 @@ class UserController extends Controller
     public function store(Request $request)
     {
         // Only admin can create users
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
@@ -136,6 +160,10 @@ class UserController extends Controller
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
             'password.min' => 'Password must be at least 12 characters.',
         ]);
+
+        if ($denied = $this->guardSuperAdmin($request, null, $validated['role'])) {
+            return $denied;
+        }
 
         $email = strtolower(trim($validated['email']));
         $counsellorType = self::COUNSELLOR_ROLE_TYPES[$validated['role']] ?? null;
@@ -175,7 +203,7 @@ class UserController extends Controller
     public function show(Request $request, $id)
     {
         // Only admin can view users
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
@@ -191,7 +219,7 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         // Only admin can update users
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
@@ -214,6 +242,10 @@ class UserController extends Controller
             'password.regex' => 'Password must contain at least one uppercase letter, one lowercase letter, and one number.',
             'password.min' => 'Password must be at least 12 characters.',
         ]);
+
+        if ($denied = $this->guardSuperAdmin($request, $user, $validated['role'] ?? null)) {
+            return $denied;
+        }
 
         $oldData = [
             'name' => $user->name,
@@ -274,11 +306,15 @@ class UserController extends Controller
      */
     public function toggleActive(Request $request, $id)
     {
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
         $user = User::findOrFail($id);
+
+        if ($denied = $this->guardSuperAdmin($request, $user, null)) {
+            return $denied;
+        }
 
         if ($user->isActive()) {
             // Attempting to deactivate
@@ -288,8 +324,8 @@ class UserController extends Controller
                 ], 422);
             }
 
-            if ($user->role === 'admin') {
-                $activeAdminCount = User::where('role', 'admin')
+            if ($user->isAdmin()) {
+                $activeAdminCount = User::whereIn('role', ['admin', 'super_admin'])
                     ->where('is_active', true)
                     ->whereNull('deactivated_at')
                     ->count();
@@ -359,14 +395,18 @@ class UserController extends Controller
     public function destroy(Request $request, $id)
     {
         // Only admin can delete users
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
         $user = User::findOrFail($id);
 
+        if ($denied = $this->guardSuperAdmin($request, $user, null)) {
+            return $denied;
+        }
+
         // Prevent deleting the only remaining admin account
-        if ($user->role === 'admin' && User::where('role', 'admin')->count() <= 1) {
+        if ($user->isAdmin() && User::whereIn('role', ['admin', 'super_admin'])->count() <= 1) {
             return response()->json([
                 'message' => 'Cannot delete the only remaining admin account in the system.',
             ], 422);
@@ -405,7 +445,7 @@ class UserController extends Controller
     public function count(Request $request)
     {
         // Only admin can view user count
-        if (!$request->user() || $request->user()->role !== 'admin') {
+        if (!$request->user() || !$request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 

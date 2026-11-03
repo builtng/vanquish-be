@@ -185,7 +185,7 @@ class QcApplicationController extends Controller
         $userMessage = null;
 
         if ($user) {
-            if (in_array($user->role, ['admin', 'staff', 'super_admin'])) {
+            if ($user->isStaff()) {
                 // Rule 3: Do not change the role or create a second account
                 $userMessage = "Existing user account with role '{$user->role}' preserved. No new account created.";
             } else {
@@ -345,7 +345,7 @@ class QcApplicationController extends Controller
         $user = User::where('email', $email)->first();
         $temporaryPassword = null;
 
-        if ($user && in_array($user->role, ['admin', 'staff', 'super_admin', 'consultation_staff', 'compliance_officer'])) {
+        if ($user && $user->isStaff()) {
             return response()->json([
                 'message' => "This email already belongs to a {$user->role} account, so a counsellor login was not created.",
             ], 409);
