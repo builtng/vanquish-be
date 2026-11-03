@@ -825,7 +825,7 @@ class TraineeApplicationController extends Controller
                     'role'                    => 'counsellor',
                     'training_counsellor_id'  => $tc->id,
                 ]);
-            } elseif (!in_array($existingUser->role, ['admin', 'staff', 'super_admin'])) {
+            } elseif (!$existingUser->isStaff()) {
                 $existingUser->update([
                     'role'                   => 'counsellor',
                     'training_counsellor_id' => $tc->id,

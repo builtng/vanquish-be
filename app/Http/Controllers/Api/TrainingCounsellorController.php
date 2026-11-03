@@ -1810,6 +1810,13 @@ class TrainingCounsellorController extends Controller
             $existingUser = User::where('email', $tc->email)->first();
             $temporaryPassword = null;
 
+            // Never turn a staff or admin login into a counsellor login.
+            if ($existingUser && $existingUser->isStaff()) {
+                return response()->json([
+                    'message' => "This email already belongs to a {$existingUser->role} account, so a counsellor login was not created and no invite was sent.",
+                ], 409);
+            }
+
             if (!$existingUser) {
                 $temporaryPassword = \Illuminate\Support\Str::random(10) . '!1Aa';
                 $existingUser = User::create([
@@ -1900,6 +1907,16 @@ class TrainingCounsellorController extends Controller
                 // 1. Find or create User account
                 $existingUser = User::where('email', $tc->email)->first();
                 $temporaryPassword = null;
+
+                // Never turn a staff or admin login into a counsellor login.
+                if ($existingUser && $existingUser->isStaff()) {
+                    $results['failed'][] = [
+                        'id' => $id,
+                        'name' => $tc->name,
+                        'reason' => "Email belongs to a {$existingUser->role} account",
+                    ];
+                    continue;
+                }
 
                 if (!$existingUser) {
                     $temporaryPassword = \Illuminate\Support\Str::random(10) . '!1Aa';
