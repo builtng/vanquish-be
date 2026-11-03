@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\Api\TraineeApplicationController;
 use App\Models\ActivityLog;
 use App\Models\PersonalTherapyToken;
 use App\Models\TraineeApplication;
@@ -33,16 +34,21 @@ class InternalPersonalTherapyConfirmationTest extends TestCase
     {
         return array_merge([
             'token' => $token,
+            'trainee_name' => 'Alice Smith',
             'therapist_name' => 'Dr. Marcus Vance',
+            'practice_name_website' => 'Vance Therapy, vancetherapy.co.uk',
             'therapist_email' => 'marcus.vance@therapy.co.uk',
             'therapist_phone' => '07999888777',
-            'professional_body' => 'BACP',
-            'membership_number' => 'BACP-998811',
-            'therapy_modality' => 'Integrative',
-            'therapy_frequency' => 'Weekly',
-            'start_date' => '2025-10-01',
-            'confirmed' => true,
+            'professional_membership' => 'BACP 998811',
+            'qualifications_modality' => 'MSc Integrative Psychotherapy',
+            'first_session_date' => '01-10-2025',
+            'sessions_to_date' => '24',
+            'sessions_during_course' => 'Yes',
+            'therapy_hours_completed' => 'On-going',
+            'suitability_concerns' => TraineeApplicationController::THERAPY_FORM_SUITABILITY[0],
+            'disclaimer' => TraineeApplicationController::THERAPY_FORM_DISCLAIMERS[0],
             'signature' => 'Marcus Vance',
+            'signing_date' => '03-11-2026',
         ], $overrides);
     }
 
@@ -99,6 +105,51 @@ class InternalPersonalTherapyConfirmationTest extends TestCase
         $response = $this->postJson('/api/trainee-applications/confirm-personal-therapy', $payload);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['trainee_email']);
+    }
+
+    /**
+     * Requirement: Answers must use the exact JotForm wording for the multiple choice questions.
+     */
+    public function test_answers_outside_the_jotform_options_are_rejected(): void
+    {
+        $trainee = $this->createTrainee();
+        $token = PersonalTherapyToken::createFor($trainee);
+
+        $payload = $this->validTherapistPayload($token->token, [
+            'therapy_hours_completed' => 'Maybe',
+            'disclaimer' => 'I confirm something else',
+        ]);
+
+        $response = $this->postJson('/api/therapy-form/confirm', $payload);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['therapy_hours_completed', 'disclaimer']);
+        $this->assertNull($token->fresh()->used_at);
+    }
+
+    /**
+     * Requirement: Choosing "Yes, I have concerns" needs details, and the concerns are recorded for staff.
+     */
+    public function test_concerns_require_details_and_are_recorded(): void
+    {
+        $trainee = $this->createTrainee();
+        $token = PersonalTherapyToken::createFor($trainee);
+
+        $payload = $this->validTherapistPayload($token->token, [
+            'suitability_concerns' => TraineeApplicationController::THERAPY_FORM_SUITABILITY[1],
+        ]);
+
+        $this->postJson('/api/therapy-form/confirm', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['concerns_details']);
+
+        $payload['concerns_details'] = 'Struggling with boundaries in recent sessions.';
+        $this->postJson('/api/therapy-form/confirm', $payload)
+            ->assertStatus(200);
+
+        $meta = $trainee->fresh()->onboarding_data['checklist_meta']['therapy_form'];
+        $this->assertTrue($meta['concerns_raised']);
+        $this->assertSame('Struggling with boundaries in recent sessions.', $meta['concerns_details']);
+        $this->assertSame('BACP 998811', $meta['professional_membership']);
     }
 
     /**
@@ -192,8 +243,9 @@ class InternalPersonalTherapyConfirmationTest extends TestCase
         $this->assertTrue($meta['status']);
         $this->assertEquals('internal_form', $meta['source']);
         $this->assertEquals('Dr. Marcus Vance', $meta['therapist_name']);
-        $this->assertEquals('BACP', $meta['professional_body']);
-        $this->assertEquals('BACP-998811', $meta['membership_number']);
+        $this->assertEquals('BACP 998811', $meta['professional_membership']);
+        $this->assertEquals('On-going', $meta['therapy_hours_completed']);
+        $this->assertFalse($meta['concerns_raised']);
 
         // 4. Activity log must record auto tick
         $this->assertDatabaseHas('activity_logs', [

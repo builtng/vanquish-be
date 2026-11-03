@@ -25,6 +25,30 @@ use App\Services\ApplicationPipelineService;
 
 class TraineeApplicationController extends Controller
 {
+    /**
+     * Answer options on the Confirmation of Personal Therapy form. The wording is copied
+     * word for word from the JotForm (https://form.jotform.com/241002800146035) and must
+     * stay identical to the options in the frontend therapy-form page.
+     */
+    public const THERAPY_FORM_SESSIONS_DURING_COURSE = ['Yes', 'No'];
+
+    public const THERAPY_FORM_HOURS_COMPLETED = [
+        'Yes',
+        'On-going',
+        'Sessions with me have concluded; to my knowledge the trainee counsellor may continue their personal therapy with another therapist.',
+    ];
+
+    public const THERAPY_FORM_SUITABILITY = [
+        'No, to the best of my knowledge, I have no concerns regarding the Trainee Counsellor’s ability to work safely, ethically, and appropriately with clients on placement.',
+        'Yes, I have concerns (please provide details below)',
+    ];
+
+    public const THERAPY_FORM_DISCLAIMERS = [
+        'I confirm the Trainee Counsellor on placement, as named above, is attending ongoing counselling/psychotherapy sessions with me, I will notify Vanquish Therapies should the sessions terminate prematurely.',
+        'I confirm the Trainee Counsellor has completed all mandatory personal therapy hours required as part of their training course since the commencement date mentioned above.',
+        'I confirm that my work with the Trainee Counsellor has concluded. To my knowledge, the Trainee Counsellor may continue to fulfil their personal therapy requirements with an alternative therapist.',
+    ];
+
     protected $emailService;
     protected $pipelineService;
 
@@ -1262,19 +1286,27 @@ class TraineeApplicationController extends Controller
         }
 
         $validated = $request->validate([
-            'token'             => 'nullable|string',
-            'trainee_email'     => $hasToken ? 'nullable' : 'required|email|max:255',
-            'trainee_name'      => 'nullable|string|max:255',
-            'therapist_name'    => 'required|string|max:255',
-            'therapist_email'   => 'required|email|max:255',
-            'therapist_phone'   => 'nullable|string|max:50',
-            'professional_body' => 'required|string|max:255',
-            'membership_number' => 'required|string|max:100',
-            'therapy_modality'  => 'nullable|string|max:255',
-            'start_date'        => 'nullable|string|max:50',
-            'therapy_frequency' => 'nullable|string|max:100',
-            'confirmed'         => 'required',
-            'signature'         => 'required|string|max:255',
+            'token'                    => 'nullable|string',
+            'trainee_email'            => $hasToken ? 'nullable' : 'required|email|max:255',
+            'trainee_name'             => 'required|string|max:255',
+            'therapist_name'           => 'required|string|max:255',
+            'practice_name_website'    => 'required|string|max:255',
+            'therapist_email'          => 'required|email|max:255',
+            'therapist_phone'          => 'required|string|max:50',
+            'professional_membership'  => 'required|string|max:255',
+            'qualifications_modality'  => 'required|string|max:255',
+            'first_session_date'       => 'required|string|max:50',
+            'sessions_to_date'         => 'required|string|max:100',
+            'sessions_during_course'   => 'required|in:' . implode(',', self::THERAPY_FORM_SESSIONS_DURING_COURSE),
+            'therapy_hours_completed'  => ['required', \Illuminate\Validation\Rule::in(self::THERAPY_FORM_HOURS_COMPLETED)],
+            'suitability_concerns'     => ['required', \Illuminate\Validation\Rule::in(self::THERAPY_FORM_SUITABILITY)],
+            'concerns_details'         => [
+                'nullable', 'string', 'max:5000',
+                \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('suitability_concerns') === self::THERAPY_FORM_SUITABILITY[1]),
+            ],
+            'disclaimer'               => ['required', \Illuminate\Validation\Rule::in(self::THERAPY_FORM_DISCLAIMERS)],
+            'signature'                => 'required|string|max:255',
+            'signing_date'             => 'required|string|max:50',
         ]);
 
         if ($tokenRecord) {
@@ -1296,10 +1328,11 @@ class TraineeApplicationController extends Controller
         $source = $tokenRecord ? 'internal_form' : 'internal_form_open_link';
 
         $now = now()->toIso8601String();
-        $tickedBy = "Therapist: {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})";
+        $concernsRaised = $validated['suitability_concerns'] === self::THERAPY_FORM_SUITABILITY[1];
+        $tickedBy = "Therapist: {$validated['therapist_name']} ({$validated['professional_membership']})";
 
-        $onboarding = is_array($trainee->onboarding_data) 
-            ? $trainee->onboarding_data 
+        $onboarding = is_array($trainee->onboarding_data)
+            ? $trainee->onboarding_data
             : ['checklist' => []];
 
         $onboarding['checklist']['therapy_form'] = true;
@@ -1309,44 +1342,58 @@ class TraineeApplicationController extends Controller
         }
 
         $onboarding['checklist_meta']['therapy_form'] = [
-            'status'            => true,
-            'ticked_by'         => $tickedBy,
-            'ticked_at'         => $now,
-            'source'            => $source,
-            'verified_by_token' => (bool) $tokenRecord,
-            'therapist_name'    => $validated['therapist_name'],
-            'therapist_email'   => $validated['therapist_email'],
-            'therapist_phone'   => $validated['therapist_phone'] ?? null,
-            'professional_body' => $validated['professional_body'],
-            'membership_number' => $validated['membership_number'],
-            'therapy_modality'  => $validated['therapy_modality'] ?? null,
-            'therapy_frequency' => $validated['therapy_frequency'] ?? null,
-            'start_date'        => $validated['start_date'] ?? null,
-            'signature'         => $validated['signature'],
+            'status'                  => true,
+            'ticked_by'               => $tickedBy,
+            'ticked_at'               => $now,
+            'source'                  => $source,
+            'verified_by_token'       => (bool) $tokenRecord,
+            'trainee_name'            => $validated['trainee_name'],
+            'therapist_name'          => $validated['therapist_name'],
+            'practice_name_website'   => $validated['practice_name_website'],
+            'therapist_email'         => $validated['therapist_email'],
+            'therapist_phone'         => $validated['therapist_phone'],
+            'professional_membership' => $validated['professional_membership'],
+            'qualifications_modality' => $validated['qualifications_modality'],
+            'first_session_date'      => $validated['first_session_date'],
+            'sessions_to_date'        => $validated['sessions_to_date'],
+            'sessions_during_course'  => $validated['sessions_during_course'],
+            'therapy_hours_completed' => $validated['therapy_hours_completed'],
+            'suitability_concerns'    => $validated['suitability_concerns'],
+            'concerns_raised'         => $concernsRaised,
+            'concerns_details'        => $validated['concerns_details'] ?? null,
+            'disclaimer'              => $validated['disclaimer'],
+            'signature'               => $validated['signature'],
+            'signing_date'            => $validated['signing_date'],
         ];
 
         $onboarding['history'][] = [
-            'action'            => 'paperwork_therapy_form_auto_ticked',
-            'status'            => true,
-            'at'                => $now,
-            'source'            => $source,
-            'therapist_name'    => $validated['therapist_name'],
+            'action'          => 'paperwork_therapy_form_auto_ticked',
+            'status'          => true,
+            'at'              => $now,
+            'source'          => $source,
+            'therapist_name'  => $validated['therapist_name'],
+            'concerns_raised' => $concernsRaised,
         ];
 
         $trainee->update(['onboarding_data' => $onboarding]);
+
+        $description = "Personal therapy confirmed internally for {$trainee->first_name} {$trainee->last_name} by therapist {$validated['therapist_name']} ({$validated['professional_membership']})";
+        if ($concernsRaised) {
+            $description .= '. The therapist has raised concerns about suitability to work with clients.';
+        }
 
         \App\Models\ActivityLog::create([
             'model_type'  => TraineeApplication::class,
             'model_id'    => $trainee->id,
             'action'      => 'paperwork_therapy_form_auto_ticked',
-            'description' => "Personal therapy confirmed internally for {$trainee->first_name} {$trainee->last_name} by therapist {$validated['therapist_name']} ({$validated['professional_body']} #{$validated['membership_number']})",
+            'description' => $description,
             'changes'     => [
-                'source'            => $source,
-                'therapist_name'    => $validated['therapist_name'],
-                'therapist_email'   => $validated['therapist_email'],
-                'professional_body' => $validated['professional_body'],
-                'membership_number' => $validated['membership_number'],
-                'ticked_at'         => $now,
+                'source'                  => $source,
+                'therapist_name'          => $validated['therapist_name'],
+                'therapist_email'         => $validated['therapist_email'],
+                'professional_membership' => $validated['professional_membership'],
+                'concerns_raised'         => $concernsRaised,
+                'ticked_at'               => $now,
             ],
             'user_id'     => optional($request->user())->id,
         ]);
