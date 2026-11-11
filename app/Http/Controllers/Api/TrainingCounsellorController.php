@@ -195,6 +195,11 @@ class TrainingCounsellorController extends Controller
 
         $tc = TrainingCounsellor::create($validated);
 
+        if (!$isQualified) {
+            // Fill anything left blank from the trainee's placement application.
+            app(\App\Services\PlacementProfileFiller::class)->fill($tc);
+        }
+
         // Store any onboarding documents the admin is uploading on the counsellor's behalf
         $documentUpdates = [];
         foreach ($documentFields as $fileField => $column) {
@@ -465,9 +470,23 @@ class TrainingCounsellorController extends Controller
                 ->firstOrFail();
         }
 
+        // Saving a profile without changing its email must never fail with
+        // "The email has already been taken" (archived or duplicate records
+        // with the same address used to block every edit). Uniqueness is only
+        // checked when the email is actually being changed, and only against
+        // live counsellors.
+        $emailRules = ['sometimes', 'email'];
+        $incomingEmail = strtolower(trim((string) $request->input('email', '')));
+        if ($request->has('email') && $incomingEmail !== strtolower(trim((string) $tc->email))) {
+            $emailRules[] = Rule::unique('training_counsellors', 'email')
+                ->ignore($tc->id)
+                ->whereNull('deleted_at')
+                ->whereNull('archived_at');
+        }
+
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
-            'email' => 'sometimes|email|unique:training_counsellors,email,' . $tc->id,
+            'email' => $emailRules,
             'phone' => 'nullable|string',
             'send_portal_invite' => 'nullable|boolean',
             'gender' => 'nullable|string|max:50',
@@ -585,6 +604,10 @@ class TrainingCounsellorController extends Controller
         ]);
 
         $tc->delete();
+
+        // Their clients go back to Pending Matches instead of showing
+        // "Matched" with no counsellor.
+        app(\App\Services\OrphanedMatchRepair::class)->releaseClientsOf($tc, request()->user()->id ?? null);
 
         ActivityLog::create([
             'user_id' => request()->user()->id ?? null,
@@ -1834,7 +1857,7 @@ class TrainingCounsellorController extends Controller
                 'first_name'         => explode(' ', $tc->name)[0] ?? $tc->name,
                 'portal_link'        => $portalUrl,
                 'email'              => $tc->email,
-                'temporary_password' => $temporaryPassword ?? '(use your existing password)',
+                'temporary_password' => app(\App\Services\PortalAccessService::class)->passwordForInvite($existingUser, $temporaryPassword),
             ]);
 
             ActivityLog::create([
@@ -1935,7 +1958,7 @@ class TrainingCounsellorController extends Controller
                     'first_name'         => explode(' ', $tc->name)[0] ?? $tc->name,
                     'portal_link'        => $portalUrl,
                     'email'              => $tc->email,
-                    'temporary_password' => $temporaryPassword ?? '(use your existing password)',
+                    'temporary_password' => app(\App\Services\PortalAccessService::class)->passwordForInvite($existingUser, $temporaryPassword),
                 ]);
 
                 ActivityLog::create([

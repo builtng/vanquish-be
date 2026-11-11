@@ -33,6 +33,7 @@ class User extends Authenticatable
         'two_factor_secret',
         'two_factor_recovery_codes',
         'two_factor_confirmed_at',
+        'last_login_at',
     ];
 
     /**
@@ -61,6 +62,7 @@ class User extends Authenticatable
             'deactivated_at' => 'datetime',
             'two_factor_enabled' => 'boolean',
             'two_factor_confirmed_at' => 'datetime',
+            'last_login_at' => 'datetime',
             'two_factor_recovery_codes' => 'array',
         ];
     }

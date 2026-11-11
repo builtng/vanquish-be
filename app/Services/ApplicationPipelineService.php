@@ -359,9 +359,7 @@ class ApplicationPipelineService
             $therapyFormUrl = $frontendUrl . '/therapy-form';
         }
 
-        if (empty($application->placement_response_token)) {
-            $application->update(['placement_response_token' => Str::random(40)]);
-        }
+        $acceptance = app(PlacementResponseLink::class)->issue($application);
 
         $effectiveInductionDate = $inductionDate
             ?? $application->induction_date
@@ -374,7 +372,7 @@ class ApplicationPipelineService
             'meeting_id'          => TraineeApplicationSetting::getByKey('induction_meeting_id', config('services.trafft.induction_meeting_id', '216 124 5208')),
             'passcode'            => TraineeApplicationSetting::getByKey('induction_passcode', config('services.trafft.induction_passcode', '')),
             'therapy_form_url'    => $therapyFormUrl,
-        ], $application);
+        ] + $acceptance, $application);
 
         $frontendUrl = rtrim(config('app.frontend_url'), '/');
         $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_onboarding_paperwork'), [

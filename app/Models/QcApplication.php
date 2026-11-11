@@ -42,6 +42,10 @@ class QcApplication extends Model
         'onboarding_data',
         'induction_date',
         'placement_response_token',
+        'placement_response_sent_at',
+        'placement_accepted',
+        'induction_rsvp',
+        'placement_responded_at',
         'archived_at',
     ];
 
@@ -51,6 +55,10 @@ class QcApplication extends Model
         'onboarding_data' => 'array',
         'signature_date' => 'date',
         'archived_at' => 'datetime',
+        'placement_response_sent_at' => 'datetime',
+        'placement_accepted' => 'boolean',
+        'induction_rsvp' => 'boolean',
+        'placement_responded_at' => 'datetime',
     ];
 
     public function getFirstNameAttribute(): string

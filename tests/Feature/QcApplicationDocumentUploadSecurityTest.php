@@ -217,7 +217,8 @@ class QcApplicationDocumentUploadSecurityTest extends TestCase
 
         $this->assertNotNull($route);
         $middleware = $route->gatherMiddleware();
-        $this->assertContains('throttle:60,1', $middleware);
+        $this->assertContains('throttle:public-uploads', $middleware);
+        $this->assertNotContains('throttle:public-forms', $middleware);
     }
 
     public function test_qc_download_document_blocks_untrusted_redirects()

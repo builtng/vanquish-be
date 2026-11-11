@@ -106,6 +106,7 @@ class TraineeApplication extends Model
         'placement_accepted',
         'induction_rsvp',
         'placement_responded_at',
+        'placement_response_sent_at',
 
         // Disclaimer
         'disclaimer_date',
@@ -122,6 +123,7 @@ class TraineeApplication extends Model
         'placement_accepted' => 'boolean',
         'induction_rsvp' => 'boolean',
         'placement_responded_at' => 'datetime',
+        'placement_response_sent_at' => 'datetime',
     ];
 
     /**

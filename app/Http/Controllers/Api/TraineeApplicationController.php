@@ -285,10 +285,7 @@ class TraineeApplicationController extends Controller
             $therapyToken = \App\Models\PersonalTherapyToken::createFor($traineeApplication);
             $therapyFormUrl = $frontendUrl . '/therapy-form?token=' . urlencode($therapyToken->token);
 
-            if (empty($traineeApplication->placement_response_token)) {
-                $traineeApplication->update(['placement_response_token' => \Illuminate\Support\Str::random(40)]);
-            }
-            $responseUrl = rtrim(config('app.frontend_url'), '/') . '/placement-response/' . $traineeApplication->placement_response_token;
+            $acceptance = app(\App\Services\PlacementResponseLink::class)->issue($traineeApplication);
 
             $this->emailService->sendAndLog($traineeApplication->email, 'trainee_placement_acceptance', [
                 'first_name'          => $traineeApplication->first_name,
@@ -297,7 +294,7 @@ class TraineeApplicationController extends Controller
                 'meeting_id'          => \App\Models\TraineeApplicationSetting::getByKey('induction_meeting_id', config('services.trafft.induction_meeting_id', '216 124 5208')),
                 'passcode'            => \App\Models\TraineeApplicationSetting::getByKey('induction_passcode', config('services.trafft.induction_passcode', '')),
                 'therapy_form_url'    => $therapyFormUrl,
-            ], $traineeApplication);
+            ] + $acceptance, $traineeApplication);
 
             $frontendUrl = rtrim(config('app.frontend_url'), '/');
             $this->emailService->sendAndLog($traineeApplication->email, 'trainee_onboarding_paperwork', [
@@ -812,6 +809,9 @@ class TraineeApplicationController extends Controller
                 ]);
             }
 
+            // Bring across availability, topics and modality from the placement application.
+            app(\App\Services\PlacementProfileFiller::class)->fill($tc, $traineeApplication);
+
             // ── 2. Find or create User account (role = counsellor) ──────────────
             $existingUser = User::where('email', $traineeApplication->email)->first();
             $temporaryPassword = null;
@@ -837,7 +837,7 @@ class TraineeApplicationController extends Controller
                 'first_name'         => $traineeApplication->first_name,
                 'portal_link'        => $portalUrl,
                 'email'              => $traineeApplication->email,
-                'temporary_password' => $temporaryPassword ?? '(use your existing password)',
+                'temporary_password' => app(\App\Services\PortalAccessService::class)->passwordForInvite($existingUser, $temporaryPassword),
             ], $traineeApplication);
 
             // ── 4. Update application status ─────────────────────────────────────
@@ -1058,10 +1058,20 @@ class TraineeApplicationController extends Controller
      */
     public function getPlacementResponse($token)
     {
-        $application = TraineeApplication::where('placement_response_token', $token)->first();
+        $application = \App\Services\PlacementResponseLink::find((string) $token);
 
         if (!$application) {
             return response()->json(['message' => 'This link is invalid or has expired.'], 404);
+        }
+
+        $isQualified = $application instanceof \App\Models\QcApplication;
+        $responded = $application->placement_accepted !== null;
+
+        if (!$responded && \App\Services\PlacementResponseLink::isExpired($application)) {
+            return response()->json([
+                'message' => 'This link has expired (links are valid for 72 hours). Please contact compliance@vanquishtherapies.co.uk and we will send you a new one.',
+                'expired' => true,
+            ], 410);
         }
 
         return response()->json([
@@ -1070,6 +1080,7 @@ class TraineeApplicationController extends Controller
             'placement_accepted' => $application->placement_accepted,
             'induction_rsvp' => $application->induction_rsvp,
             'responded_at' => $application->placement_responded_at,
+            'applicant_type' => $isQualified ? 'qualified' : 'trainee',
         ]);
     }
 
@@ -1079,11 +1090,20 @@ class TraineeApplicationController extends Controller
      */
     public function submitPlacementResponse(Request $request, $token)
     {
-        $application = TraineeApplication::where('placement_response_token', $token)->first();
+        $application = \App\Services\PlacementResponseLink::find((string) $token);
 
         if (!$application) {
             return response()->json(['message' => 'This link is invalid or has expired.'], 404);
         }
+
+        if ($application->placement_accepted === null && \App\Services\PlacementResponseLink::isExpired($application)) {
+            return response()->json([
+                'message' => 'This link has expired (links are valid for 72 hours). Please contact compliance@vanquishtherapies.co.uk and we will send you a new one.',
+                'expired' => true,
+            ], 410);
+        }
+
+        $isQualified = $application instanceof \App\Models\QcApplication;
 
         $validated = $request->validate([
             'placement_accepted' => 'required|boolean',
@@ -1101,10 +1121,10 @@ class TraineeApplicationController extends Controller
             ActivityLog::create([
                 'user_id' => null,
                 'action' => 'trainee_placement_response_recorded',
-                'model_type' => TraineeApplication::class,
+                'model_type' => get_class($application),
                 'model_id' => $application->id,
                 'description' => "{$application->first_name} {$application->last_name} " .
-                    ($validated['placement_accepted'] ? 'accepted' : 'declined') . ' the placement offer, and ' .
+                    ($validated['placement_accepted'] ? 'accepted' : 'declined') . ($isQualified ? ' the offer, and ' : ' the placement offer, and ') .
                     ($validated['induction_rsvp'] ? 'confirmed' : 'declined') . ' induction attendance',
                 'changes' => $validated,
                 'ip_address' => $request->ip(),
@@ -1114,7 +1134,7 @@ class TraineeApplicationController extends Controller
         }
 
         try {
-            $dashboardUrl = rtrim(config('app.frontend_url'), '/') . '/dashboard/trainee-applications/' . $application->id;
+            $dashboardUrl = rtrim(config('app.frontend_url'), '/') . ($isQualified ? '/dashboard/qualified-applications/' : '/dashboard/trainee-applications/') . $application->id;
             $this->emailService->sendAndLog('compliance@vanquishtherapies.co.uk', 'admin_placement_response_notification', [
                 'applicant_name' => $application->first_name . ' ' . $application->last_name,
                 'applicant_email' => $application->email,

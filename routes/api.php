@@ -98,12 +98,11 @@ Route::post('/public/psg/{token}', [PsgSessionController::class, 'submitSession'
 
 // Intake Forms (public - clients need to submit without auth)
 // Rate limited to prevent abuse
-Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
+Route::middleware(['throttle:public-forms', 'maintenance'])->group(function () {
     Route::post('/client-intake', [IntakeFormController::class, 'clientIntake']);
     Route::post('/intake/confirm-payment', [IntakeController::class, 'handlePaymentSuccess']);
     Route::get('/intake/success', [IntakeController::class, 'success'])->name('intake.success');
     Route::post('/tc-intake', [IntakeFormController::class, 'tcIntake']);
-    Route::post('/tc-intake/upload-document', [IntakeFormController::class, 'uploadDocument'])->middleware('throttle:60,1');
     Route::get('/client-agreement/prefill/{uuid}', [ClientAgreementController::class, 'getAgreementData']);
     Route::post('/client-agreement/submit', [ClientAgreementController::class, 'submitAgreement']);
     Route::get('/client-agreement/download/{uuid}', [ClientAgreementController::class, 'downloadAgreementPdf']);
@@ -117,8 +116,15 @@ Route::middleware(['throttle:10,1', 'maintenance'])->group(function () {
     Route::post('/therapy-form/confirm', [TraineeApplicationController::class, 'confirmPersonalTherapy']);
     Route::post('/qualified-counsellor/submit', [TrainingCounsellorController::class, 'submitQualifiedForm']);
     Route::post('/submit-qualified-form', [TrainingCounsellorController::class, 'submitQualifiedForm']);
-    Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument'])->middleware('throttle:60,1');
     Route::get('/qualified-counsellor/prefill/{uuid}', [TrainingCounsellorController::class, 'publicPrefill']);
+});
+
+// Document uploads for the public application forms. Kept out of the group
+// above so they have their own counter: an applicant uploading six documents
+// must still be able to submit the form straight afterwards.
+Route::middleware(['throttle:public-uploads', 'maintenance'])->group(function () {
+    Route::post('/tc-intake/upload-document', [IntakeFormController::class, 'uploadDocument']);
+    Route::post('/qualified-counsellor/upload-document', [TrainingCounsellorController::class, 'uploadDocument']);
 });
 
 // Induction acceptance (public - TCs need to accept without auth)

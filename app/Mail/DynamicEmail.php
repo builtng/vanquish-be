@@ -193,7 +193,8 @@ class DynamicEmail extends Mailable
         $attachments = [];
 
         $type = $this->template->type ?? null;
-        if ($type === 'trainee_placement_acceptance' || $type === 'qc_placement_acceptance') {
+        // The 4-way agreement (trainee, tutor, supervisor) is for trainees only.
+        if ($type === 'trainee_placement_acceptance') {
             $directory = storage_path('app/templates');
             if (!is_dir($directory)) {
                 mkdir($directory, 0755, true);
@@ -967,6 +968,7 @@ class DynamicEmail extends Mailable
             }
         }
 
-        return $defaults;
+        // Accept button on acceptance emails; no "placement" wording for qualified counsellors.
+        return \App\Support\AcceptanceEmailContent::applyQcDefaults($defaults);
     }
 }

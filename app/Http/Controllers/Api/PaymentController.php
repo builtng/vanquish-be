@@ -296,6 +296,8 @@ class PaymentController extends Controller
                         'stripe_customer_id' => $paymentIntent->customer,
                         'paid_at' => now(),
                         'payment_method' => $paymentIntent->payment_method_types[0] ?? 'card',
+                        // Held as 'pending' while unpaid; paid means it is booked.
+                        'status' => $consultation->status === 'pending' ? 'scheduled' : $consultation->status,
                     ]);
 
                     // Update related Client Intake Form
@@ -607,6 +609,7 @@ class PaymentController extends Controller
                     'stripe_customer_id' => $paymentIntent->customer,
                     'paid_at' => now(),
                     'payment_method' => $paymentIntent->payment_method_types[0] ?? 'card',
+                    'status' => $consultation->status === 'pending' ? 'scheduled' : $consultation->status,
                 ]);
 
                 // Update related Client Intake Form

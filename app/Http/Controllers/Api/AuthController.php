@@ -92,6 +92,7 @@ class AuthController extends Controller
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
+        $user->forceFill(['last_login_at' => now()])->save();
 
         return response()->json([
             'user' => $this->formatUserResponse($user),
@@ -399,6 +400,10 @@ class AuthController extends Controller
 
             $baseUrl = rtrim(config('app.frontend_url', 'http://localhost:3000'), '/');
             $resetUrl = $baseUrl . '/reset-password?token=' . $token . '&email=' . urlencode($email);
+            if ($user->role === 'counsellor') {
+                // Brings counsellors back to the counsellor login after resetting.
+                $resetUrl .= '&portal=counsellor';
+            }
 
             try {
                 app(EmailService::class)->sendAndLog(

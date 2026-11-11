@@ -864,10 +864,23 @@ class ClientController extends Controller
             'send_notification' => 'boolean',
             'allocated_day' => 'nullable|string|max:50',
             'allocated_time' => 'nullable|string|max:50',
+            'manual_override' => 'nullable|boolean',
         ]);
 
         $notes = $validated['match_notes'] ?? $validated['assignment_notes'] ?? null;
         $flags = $validated['flags'] ?? [];
+        $manualOverride = (bool) ($validated['manual_override'] ?? false);
+
+        // "Match manually": admin chose a time outside the overlapping
+        // availability. Allowed, but the reason must be written down.
+        if ($manualOverride && empty(trim((string) $notes))) {
+            return response()->json([
+                'message' => 'Please add a note explaining why you are matching manually.',
+            ], 422);
+        }
+        if ($manualOverride && !in_array('Manual match (availability override)', $flags, true)) {
+            $flags[] = 'Manual match (availability override)';
+        }
 
         // If the algorithm flagged this practitioner as a weak match, require
         // the admin to justify the override in writing before proceeding.
@@ -901,7 +914,7 @@ class ClientController extends Controller
         }
 
         // For Low Cost clients with an assigned session time, ensure the slot is in both availability schedules
-        if ($client->service_type === 'Low Cost' && !empty($validated['allocated_day']) && !empty($validated['allocated_time'])) {
+        if (!$manualOverride && $client->service_type === 'Low Cost' && !empty($validated['allocated_day']) && !empty($validated['allocated_time'])) {
             $clientAvail = $client->availability ?? [];
             if (is_string($clientAvail)) {
                 $clientAvail = json_decode($clientAvail, true) ?: [];
@@ -930,6 +943,10 @@ class ClientController extends Controller
         }
 
 
+        // Save the match and the client's "matched" status together, so a
+        // client can never end up "Matched" with no counsellor recorded.
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
         // Check if match already exists
         $existingMatch = ClientTcMatch::where('client_id', $client->id)
             ->where('tc_id', $tc->id)
@@ -1009,6 +1026,12 @@ class ClientController extends Controller
         }
 
         $client->update($updateData);
+
+            \Illuminate\Support\Facades\DB::commit();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            throw $e;
+        }
 
         // Send notification emails if requested
         $shouldSendNotification = $validated['send_notification'] ?? true;

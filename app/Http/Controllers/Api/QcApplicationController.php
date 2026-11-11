@@ -353,7 +353,7 @@ class QcApplicationController extends Controller
 
         if (!$user) {
             $temporaryPassword = Str::random(10) . '!1Aa';
-            User::create([
+            $user = User::create([
                 'name' => $tc->name,
                 'email' => $email,
                 'password' => Hash::make($temporaryPassword),
@@ -373,7 +373,7 @@ class QcApplicationController extends Controller
             'first_name' => $qcApp->first_name ?: (explode(' ', (string) $tc->name)[0] ?? $tc->name),
             'portal_link' => $portalUrl,
             'email' => $email,
-            'temporary_password' => $temporaryPassword ?? '(use your existing password)',
+            'temporary_password' => app(\App\Services\PortalAccessService::class)->passwordForInvite($user, $temporaryPassword),
         ], $qcApp);
 
         // 4. Application: Onboarding, linked practitioner, portal access recorded.

@@ -682,6 +682,7 @@ class EmailTemplateController extends Controller
             }
         }
 
-        return $defaults;
+        // Accept button on acceptance emails; no "placement" wording for qualified counsellors.
+        return \App\Support\AcceptanceEmailContent::applyQcDefaults($defaults);
     }
 }
