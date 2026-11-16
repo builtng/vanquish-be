@@ -1989,7 +1989,8 @@ class TrainingCounsellorController extends Controller
         if (!$user) {
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
-        if (!in_array($user->role, ['admin', 'staff', 'superadmin']) && $user->id !== $tc->user_id) {
+        // Any staff role, or the counsellor whose profile this is.
+        if (!$user->isStaff() && (int) $user->training_counsellor_id !== (int) $tc->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 

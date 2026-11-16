@@ -384,6 +384,10 @@ class ClientController extends Controller
             'sessions_completed' => 'nullable|integer|min:0',
         ]);
 
+        if (isset($validated['stage']) && $response = $this->refuseMatchedStageWithoutCounsellor($client, $validated['stage'])) {
+            return $response;
+        }
+
         $client->update($validated);
 
         if (array_key_exists('sessions_completed', $validated)) {
@@ -527,6 +531,10 @@ class ClientController extends Controller
             'stage' => 'required|in:Consultation Booked,Consultation Completed,Agreement Sent,Agreement Signed,Matched with counsellor,Matched With Counsellor,Matched with TC,Sessions Booked,Sessions Bookable,Active Therapy,Application & Assessment form Submitted,Awaiting payment',
         ]);
 
+        if ($response = $this->refuseMatchedStageWithoutCounsellor($client, $request->stage)) {
+            return $response;
+        }
+
         $oldStage = $client->stage;
         $client->update(['stage' => $request->stage]);
 
@@ -540,6 +548,22 @@ class ClientController extends Controller
         ]);
 
         return response()->json($client);
+    }
+
+    /**
+     * A client can only be in a "Matched" stage once a counsellor is chosen;
+     * otherwise they vanish from Pending Matches with "Not assigned".
+     */
+    private function refuseMatchedStageWithoutCounsellor(Client $client, ?string $stage)
+    {
+        if (Client::isMatchedStage($stage) && !$client->hasActiveMatchedCounsellor()) {
+            return response()->json([
+                'message' => 'Choose a counsellor before marking this client as matched',
+                'errors' => ['stage' => ['Choose a counsellor before marking this client as matched']],
+            ], 422);
+        }
+
+        return null;
     }
 
     public function pendingMatches(Request $request)

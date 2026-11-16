@@ -17,6 +17,11 @@ class UpdateLastActive
      */
     public function handle(Request $request, Closure $next): Response
     {
+        // An admin viewing the portal is not the counsellor being active.
+        if (\App\Support\Impersonation::active($request)) {
+            return $next($request);
+        }
+
         if ($user = $request->user()) {
             if ($user->role === 'counsellor' && $user->training_counsellor_id) {
                 $cacheKey = "last-active-update-{$user->id}";

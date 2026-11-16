@@ -200,6 +200,8 @@ class ConsultationBookingFlowTest extends TestCase
             'name'      => 'Diana Journey',
             'email'     => 'diana.journey@example.com',
             'stage'     => 'Consultation Booked',
+            // A matched stage needs a real counsellor (16 Nov).
+            'matched_tc_id' => $this->journeyCounsellor()->id,
         ]);
 
         $stages = [
@@ -270,6 +272,7 @@ class ConsultationBookingFlowTest extends TestCase
                 'name'      => "Stage Test {$i}",
                 'email'     => "stage.test.{$i}@example.com",
                 'stage'     => 'Consultation Booked',
+                'matched_tc_id' => $this->journeyCounsellor()->id,
             ]);
 
             $response = $this->actingAs($admin)->postJson(
@@ -281,5 +284,13 @@ class ConsultationBookingFlowTest extends TestCase
                 "Stage '{$stage}' should be accepted – got {$response->status()}: {$response->content()}"
             );
         }
+    }
+
+    private function journeyCounsellor(): \App\Models\TrainingCounsellor
+    {
+        return \App\Models\TrainingCounsellor::firstOrCreate(
+            ['tc_id' => 'TC-JOURNEY'],
+            ['name' => 'Journey Counsellor', 'email' => 'journey.tc@example.com', 'status' => 'Active', 'counsellor_type' => 'Trainee']
+        );
     }
 }

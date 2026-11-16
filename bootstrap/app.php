@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
             'staff' => \App\Http\Middleware\EnsureUserIsStaff::class,
             'maintenance' => \App\Http\Middleware\CheckMaintenance::class,
+            'impersonation.readonly' => \App\Http\Middleware\BlockImpersonationWrites::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

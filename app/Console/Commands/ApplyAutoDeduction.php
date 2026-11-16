@@ -49,23 +49,25 @@ class ApplyAutoDeduction extends Command
             $nextSession = $client->getNextSessionNeedingBooking();
 
             if ($nextSession && !$nextSession->auto_deduction_applied) {
-                // Check if client has booked (if they have, skip)
+                // Check if client has booked anything after the last booked
+                // session (if they have, skip). Strictly after: the last
+                // session itself is always "scheduled" and must not count.
                 $hasBooked = Session::where('client_id', $client->id)
-                    ->where('scheduled_at', '>=', $nextSession->scheduled_at)
+                    ->where('scheduled_at', '>', $nextSession->scheduled_at)
                     ->where('status', 'scheduled')
                     ->exists();
 
                 if (!$hasBooked) {
                     // Apply auto-deduction: create 3 sessions instead of 4
-                    $this->createAutoDeductionSessions($client, $nextSession);
+                    $created = $this->createAutoDeductionSessions($client, $nextSession);
 
                     // Mark auto-deduction as applied
                     $nextSession->update(['auto_deduction_applied' => true]);
 
-                    // Update client's next booking deadline
-                    $lastSessionDate = Carbon::parse($nextSession->scheduled_at)->addWeeks(2); // 3 sessions = 3 weeks
+                    // Next deadline: 48 hours before the week after the last
+                    // new session (same rule as a normal block booking).
                     $client->update([
-                        'next_booking_deadline' => $lastSessionDate->copy()->subHours(48)->format('Y-m-d'),
+                        'next_booking_deadline' => $this->deadlineAfter(end($created)),
                     ]);
 
                     // Notify client
@@ -96,16 +98,20 @@ class ApplyAutoDeduction extends Command
     /**
      * Create 3 sessions for auto-deduction
      */
-    private function createAutoDeductionSessions(Client $client, Session $nextSession)
+    private function createAutoDeductionSessions(Client $client, Session $nextSession): array
     {
-        $startDate = Carbon::parse($nextSession->scheduled_at);
-        $dayOfWeek = $startDate->dayOfWeek;
+        // $nextSession is the LAST session already booked, so the new block
+        // starts one week after it (it used to start on the same date,
+        // double-booking that slot).
+        $startDate = Carbon::parse($nextSession->scheduled_at)->addWeek();
+        $created = [];
 
         // Create 3 sessions (weekly)
         for ($i = 0; $i < 3; $i++) {
             $sessionDate = $startDate->copy()->addWeeks($i);
+            $isLast = $i === 2;
 
-            Session::create([
+            $created[] = Session::create([
                 'client_id' => $client->id,
                 'tc_id' => $client->matched_tc_id,
                 'session_type' => 'low_cost',
@@ -116,7 +122,15 @@ class ApplyAutoDeduction extends Command
                 'total_sessions_in_block' => 3,
                 'payment_status' => 'pending',
                 'auto_deduction_applied' => true,
+                'booking_deadline' => $isLast ? Carbon::parse($sessionDate)->addWeek()->subHours(48)->format('Y-m-d') : null,
             ]);
         }
+
+        return $created;
+    }
+
+    private function deadlineAfter(Session $lastSession): string
+    {
+        return Carbon::parse($lastSession->scheduled_at)->addWeek()->subHours(48)->format('Y-m-d');
     }
 }

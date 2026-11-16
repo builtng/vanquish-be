@@ -136,7 +136,15 @@ Route::get('/trainee-placement-response/{token}', [TraineeApplicationController:
 Route::post('/trainee-placement-response/{token}', [TraineeApplicationController::class, 'submitPlacementResponse']);
 
 // Protected routes - higher rate limit for authenticated users
-Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
+Route::middleware(['auth:sanctum', 'impersonation.readonly', 'throttle:200,1'])->group(function () {
+    // "View portal" (admin sees a counsellor's portal, read-only). Stop is
+    // listed first so "stop" is not read as a counsellor id.
+    Route::post('/admin/impersonate/stop', [\App\Http\Controllers\Api\Admin\ImpersonationController::class, 'stop'])
+        ->name('admin.impersonate.stop');
+    Route::post('/admin/impersonate/{tc}', [\App\Http\Controllers\Api\Admin\ImpersonationController::class, 'start'])
+        ->middleware('admin')
+        ->name('admin.impersonate.start');
+
     // Auth
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);

@@ -41,6 +41,39 @@ class OrphanedMatchRepair
         return $count;
     }
 
+    /**
+     * Clients in a "Matched" stage with no counsellor at all (matched_tc_id
+     * null). Returns them; when $apply is true they are moved back to
+     * "Consultation Completed" so they reappear in Pending Matches.
+     *
+     * @return \Illuminate\Support\Collection<int, Client>
+     */
+    public function unassignedMatches(bool $apply, ?int $userId = null)
+    {
+        $clients = Client::whereNull('matched_tc_id')
+            ->get()
+            ->filter(fn (Client $c) => Client::isMatchedStage($c->stage))
+            ->values();
+
+        if ($apply) {
+            foreach ($clients as $client) {
+                $oldStage = $client->stage;
+                $client->update(['stage' => 'Consultation Completed', 'matched_date' => null]);
+
+                ActivityLog::create([
+                    'user_id' => $userId,
+                    'action' => 'client_stage_repaired',
+                    'model_type' => Client::class,
+                    'model_id' => $client->id,
+                    'description' => "{$client->name} moved from \"{$oldStage}\" back to Pending Matches (Consultation Completed) because no counsellor was assigned",
+                    'changes' => ['stage' => ['from' => $oldStage, 'to' => 'Consultation Completed']],
+                ]);
+            }
+        }
+
+        return $clients;
+    }
+
     private function release(Client $client, int $tcId, string $reason, ?int $userId): void
     {
         ClientTcMatch::where('client_id', $client->id)

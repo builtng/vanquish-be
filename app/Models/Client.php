@@ -155,6 +155,38 @@ class Client extends Model
         return max((int) ($this->sessions_completed ?? 0), $relationCount);
     }
 
+    /** Stages that mean "this client has a counsellor". */
+    public const MATCHED_STAGES = [
+        'Matched with counsellor',
+        'Matched With Counsellor',
+        'Matched with TC',
+    ];
+
+    public static function isMatchedStage(?string $stage): bool
+    {
+        if ($stage === null) {
+            return false;
+        }
+        $stage = mb_strtolower(trim($stage));
+        foreach (self::MATCHED_STAGES as $matched) {
+            if (mb_strtolower($matched) === $stage) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** True when matched_tc_id points at a counsellor that exists and is not archived. */
+    public function hasActiveMatchedCounsellor(): bool
+    {
+        if (!$this->matched_tc_id) {
+            return false;
+        }
+
+        return TrainingCounsellor::whereKey($this->matched_tc_id)->whereNull('archived_at')->exists();
+    }
+
     public function matchedTc(): BelongsTo
     {
         return $this->belongsTo(TrainingCounsellor::class, 'matched_tc_id');
