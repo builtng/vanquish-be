@@ -73,7 +73,8 @@ jobs:
           php artisan config:cache
           php artisan route:cache
           php artisan view:cache
-          php artisan about --only=environment
+          # 'about' needs proc_open, which Hostinger disables, so it must not fail the deploy
+          php artisan about --only=environment || echo '(about unavailable: proc_open disabled on Hostinger)'
           EOF
 
       - name: Health check
@@ -81,3 +82,12 @@ jobs:
           body=$(curl -s https://api.vqtmanagement.com/api/user -H "Accept: application/json")
           echo "$body"
           echo "$body" | grep -q 'Unauthenticated' || { echo "API health check failed"; exit 1; }
+
+      - name: CORS preflight check (Vercel frontend)
+        run: |
+          headers=$(curl -s -o /dev/null -D - -X OPTIONS https://api.vqtmanagement.com/api/login \
+            -H "Origin: https://vanquish0.vercel.app" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: content-type,authorization")
+          echo "$headers"
+          echo "$headers" | grep -qi '^access-control-allow-origin: https://vanquish0.vercel.app' || { echo "CORS preflight failed"; exit 1; }
