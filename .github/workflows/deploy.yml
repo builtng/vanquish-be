@@ -1,0 +1,115 @@
+# Auto-deploy the API to Hostinger on every push to main.
+#
+# Why it is built here and not on the server: Hostinger disables proc_open,
+# which Composer needs, and the server folder is not a git checkout. So
+# GitHub runs the tests, builds vendor/ (no dev packages), uploads the files
+# over SSH with rsync, then runs the artisan steps on the server.
+#
+# Never touched on the server: .env, storage/ (uploads, logs, sessions),
+# public/storage (the storage link) and public/build. rsync runs WITHOUT
+# --delete, so files that only exist on the server are left alone.
+#
+# Repository secrets needed (Settings > Secrets and variables > Actions):
+#   SSH_HOST         server address from hPanel > Advanced > SSH Access
+#   SSH_PORT         SSH port from the same page (Hostinger usually uses 65002)
+#   SSH_USER         SSH username, e.g. u729684593
+#   SSH_PRIVATE_KEY  private key whose public key is added in hPanel SSH Access
+#   DEPLOY_PATH      /home/u729684593/domains/api.vqtmanagement.com/public_html
+
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, pdo_sqlite, sqlite3, gd, zip, intl, bcmath
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run tests
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, gd, zip, intl, bcmath
+          coverage: none
+
+      - name: Build production vendor/
+        run: composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
+
+      - name: Set up SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload files
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -rlz --checksum --omit-dir-times --no-perms \
+            -e "ssh -i ~/.ssh/deploy_key -p $SSH_PORT" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='storage/' \
+            --exclude='public/storage' \
+            --exclude='public/build/' \
+            --exclude='public/hot' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            --exclude='bootstrap/cache/*.php' \
+            ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      - name: Run artisan steps on the server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+          set -euo pipefail
+          cd "$1"
+          php artisan optimize:clear
+          # Schema changes only: one-off data fixes are artisan commands, not migrations.
+          php artisan migrate --force
+          php artisan optimize
+          php artisan about --only=environment
+          REMOTE
