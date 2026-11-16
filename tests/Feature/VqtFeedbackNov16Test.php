@@ -390,4 +390,27 @@ class VqtFeedbackNov16Test extends TestCase
 
         Carbon::setTestNow();
     }
+
+    // ── 5. Emergency contact step removed from the intake forms ─────
+
+    public function test_intake_is_accepted_without_emergency_contact_details(): void
+    {
+        foreach (['Low Cost' => 'lowcost@example.com', 'Mid Range' => 'midrange@example.com'] as $service => $email) {
+            $this->postJson('/api/client-intake', [
+                'first_name' => 'Tom',
+                'last_name' => 'Smith',
+                'email' => $email,
+                'age' => 30,
+                'service_type' => $service,
+                'address' => '1 High Street, London',
+                'terms_accepted' => true,
+            ])->assertStatus(201);
+
+            $client = Client::where('email', $email)->first();
+            $this->assertNotNull($client, $service);
+            $this->assertNull($client->emergency_contact_name);
+            $this->assertNull($client->emergency_contact_phone);
+            $this->assertNull($client->emergency_contact_relationship);
+        }
+    }
 }

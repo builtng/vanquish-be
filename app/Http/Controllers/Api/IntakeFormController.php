@@ -77,9 +77,11 @@ class IntakeFormController extends Controller
                 'referrer_org' => 'nullable|string|max:255',
                 'referrer_email' => 'nullable|email|max:255',
                 'address' => 'required|string|max:500',
-                'emergency_contact_name' => 'required|string|max:255',
-                'emergency_contact_phone' => 'required|string|max:255',
-                'emergency_contact_relationship' => 'required|string|max:255',
+                // Emergency contact step removed from the intake forms (VQT, 16 Nov 2026);
+                // still accepted if sent.
+                'emergency_contact_name' => 'nullable|string|max:255',
+                'emergency_contact_phone' => 'nullable|string|max:255',
+                'emergency_contact_relationship' => 'nullable|string|max:255',
                 'core34_answers' => 'nullable|array',
                 'terms_accepted' => 'required|boolean|accepted',
                 'create_client' => 'nullable|boolean',
