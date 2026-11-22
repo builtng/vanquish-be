@@ -829,6 +829,10 @@ class TraineeApplicationController extends Controller
                 $existingUser->update([
                     'role'                   => 'counsellor',
                     'training_counsellor_id' => $tc->id,
+                    // Re-linking a login also switches it back on: archiving a duplicate
+                    // record with the same email used to leave it deactivated.
+                    'is_active' => true,
+                    'deactivated_at' => null,
                 ]);
             }
 

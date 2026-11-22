@@ -937,26 +937,27 @@ class ClientController extends Controller
             return response()->json(['message' => 'Mid-Range and Coaching clients must be matched with a Qualified Counsellor.'], 422);
         }
 
-        // For Low Cost clients with an assigned session time, ensure the slot is in both availability schedules
-        if (!$manualOverride && $client->service_type === 'Low Cost' && !empty($validated['allocated_day']) && !empty($validated['allocated_time'])) {
-            $clientAvail = $client->availability ?? [];
-            if (is_string($clientAvail)) {
-                $clientAvail = json_decode($clientAvail, true) ?: [];
-            }
-            $tcAvail = $tc->availability ?? [];
-            if (is_string($tcAvail)) {
-                $tcAvail = json_decode($tcAvail, true) ?: [];
-            }
+        // Low Cost clients book on a fixed weekly day and time, so a match
+        // without one leaves them unable to book (the Practitioners page's
+        // "Assign Client" used to send none).
+        if ($client->service_type === 'Low Cost'
+            && (empty($validated['allocated_day']) || empty($validated['allocated_time']))) {
+            return response()->json([
+                'message' => 'Choose the weekly day and time for this Low Cost client before assigning.',
+                'errors' => ['allocated_time' => ['Choose the weekly day and time for this Low Cost client before assigning.']],
+            ], 422);
+        }
+
+        // For Low Cost clients with an assigned session time, ensure the slot
+        // is in both availability schedules. Compared the same way as the
+        // matching screen: any day-name case, any saved time format.
+        if (!$manualOverride && $client->service_type === 'Low Cost') {
+            $clientAvail = \App\Support\SlotTime::normalize($client->availability);
+            $tcAvail = \App\Support\SlotTime::normalize($tc->availability);
 
             if (!empty($clientAvail) && !empty($tcAvail)) {
-                $dayKey = strtolower(trim($validated['allocated_day']));
-                $timeSlot = trim($validated['allocated_time']);
-
-                $clientDaySlots = array_map('strtolower', (array) ($clientAvail[$dayKey] ?? []));
-                $tcDaySlots = array_map('strtolower', (array) ($tcAvail[$dayKey] ?? []));
-
-                $clientHas = $this->slotMatchesAvailability($timeSlot, $clientDaySlots);
-                $tcHas = $this->slotMatchesAvailability($timeSlot, $tcDaySlots);
+                $clientHas = \App\Support\SlotTime::offers($clientAvail, $validated['allocated_day'], $validated['allocated_time']);
+                $tcHas = \App\Support\SlotTime::offers($tcAvail, $validated['allocated_day'], $validated['allocated_time']);
 
                 if (!$clientHas || !$tcHas) {
                     return response()->json([
@@ -1675,36 +1676,5 @@ class ClientController extends Controller
         // For clients, I will use "CLIENT_CHARLES_REPORT.pdf" to differentiate.
         $sanitizedName = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '_', $client->name));
         return $pdf->download("CLIENT_{$sanitizedName}_REPORT.pdf");
-    }
-
-    private function slotMatchesAvailability(string $targetSlot, array $daySlots): bool
-    {
-        $targetClean = strtolower(str_replace(' ', '', $targetSlot));
-
-        // Mapping for abstract slots
-        $abstractExpansions = [
-            'morning-early' => ['10am-1050am'],
-            'morning-late' => ['11am-1150am', '12pm-1250pm'],
-            'afternoon-early' => ['1pm-150pm', '2pm-250pm', '3pm-350pm'],
-            'afternoon-late' => ['4pm-450pm'],
-            'evening' => ['5pm-550pm', '6pm-650pm'],
-            'morning' => ['10am-1050am', '11am-1150am'],
-            'afternoon' => ['12pm-1250pm', '1pm-150pm', '2pm-250pm', '3pm-350pm', '4pm-450pm'],
-        ];
-
-        foreach ($daySlots as $slot) {
-            $slotClean = strtolower(str_replace(' ', '', (string) $slot));
-            if ($slotClean === $targetClean) {
-                return true;
-            }
-            if (isset($abstractExpansions[$slotClean]) && in_array($targetClean, $abstractExpansions[$slotClean], true)) {
-                return true;
-            }
-            if (isset($abstractExpansions[$targetClean]) && in_array($slotClean, $abstractExpansions[$targetClean], true)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
