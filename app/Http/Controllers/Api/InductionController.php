@@ -17,6 +17,82 @@ class InductionController extends Controller
     /**
      * Get all inductions
      */
+    /**
+     * Who is coming to each induction, straight from the placement
+     * acceptance link: everyone sent an acceptance (trainee and qualified),
+     * grouped by the induction date in their email, split into attending
+     * (accepted the placement and confirmed attendance), not attending, and
+     * no reply yet. Nobody has to be onboarded first.
+     */
+    public function placementAttendees(Request $request)
+    {
+        $since = now()->subDays(180);
+        $people = collect();
+
+        $trainees = \App\Models\TraineeApplication::whereNull('archived_at')
+            ->whereNotNull('placement_response_sent_at')
+            ->where('placement_response_sent_at', '>=', $since)
+            ->get();
+        foreach ($trainees as $a) {
+            $people->push($this->placementPerson($a, 'Trainee', trim("{$a->first_name} {$a->last_name}")));
+        }
+
+        $qcs = \App\Models\QcApplication::whereNull('archived_at')
+            ->whereNotNull('placement_response_sent_at')
+            ->where('placement_response_sent_at', '>=', $since)
+            ->get();
+        foreach ($qcs as $a) {
+            $name = trim(($a->legal_first_name ?? '') . ' ' . ($a->legal_last_name ?? '')) ?: (string) $a->name;
+            $people->push($this->placementPerson($a, 'Qualified', $name));
+        }
+
+        $groups = $people
+            ->groupBy(fn ($p) => $p['induction_date'] ?: 'Date not set')
+            ->map(function ($list, $date) {
+                $sorted = $list->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)->values();
+                return [
+                    'induction_date' => $date,
+                    'sent_from' => $list->min('sent_at'),
+                    'attending' => $sorted->where('response', 'attending')->values(),
+                    'not_attending' => $sorted->where('response', 'not_attending')->values(),
+                    'no_reply' => $sorted->where('response', 'no_reply')->values(),
+                ];
+            })
+            // newest acceptance round first
+            ->sortByDesc('sent_from')
+            ->values();
+
+        return response()->json([
+            'groups' => $groups,
+            'totals' => [
+                'attending' => $people->where('response', 'attending')->count(),
+                'not_attending' => $people->where('response', 'not_attending')->count(),
+                'no_reply' => $people->where('response', 'no_reply')->count(),
+            ],
+        ]);
+    }
+
+    private function placementPerson($application, string $type, string $name): array
+    {
+        $responded = $application->placement_responded_at !== null;
+        $response = !$responded
+            ? 'no_reply'
+            : (($application->placement_accepted && $application->induction_rsvp) ? 'attending' : 'not_attending');
+
+        return [
+            'id' => $application->id,
+            'type' => $type,
+            'name' => $name !== '' ? $name : (string) $application->email,
+            'email' => $application->email,
+            'induction_date' => $application->induction_date,
+            'placement_accepted' => $application->placement_accepted,
+            'induction_rsvp' => $application->induction_rsvp,
+            'response' => $response,
+            'responded_at' => optional($application->placement_responded_at)->toIso8601String(),
+            'sent_at' => optional($application->placement_response_sent_at)->toIso8601String(),
+        ];
+    }
+
     public function index(Request $request)
     {
         $query = Induction::with(['trainingCounsellor', 'attendees.trainingCounsellor']);

@@ -365,6 +365,12 @@ class ApplicationPipelineService
             ?? $application->induction_date
             ?? TraineeApplicationSetting::getByKey('next_induction_date', config('services.trafft.next_induction_date', 'Monday, 19th January, 10:00am'));
 
+        // Keep the date the email gives on the application, so the Inductions
+        // page can list who is coming to which induction.
+        if ($effectiveInductionDate && $application->induction_date !== $effectiveInductionDate) {
+            $application->forceFill(['induction_date' => $effectiveInductionDate])->save();
+        }
+
         $this->emailService->sendAndLog($application->email, $this->getTemplate($application, 'trainee_placement_acceptance'), [
             'first_name'          => $application->first_name,
             'induction_date'      => $effectiveInductionDate,

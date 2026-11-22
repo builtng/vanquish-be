@@ -222,4 +222,53 @@ class VqtFeedbackNov22Test extends TestCase
         $admin = User::factory()->create(['role' => 'admin']);
         $this->actingAs($admin)->postJson("/api/admin/impersonate/{$tc->uuid}")->assertStatus(200);
     }
+
+    // ── #10: who is coming to the induction ──────────────────────────
+
+    public function test_accepting_the_placement_shows_the_person_as_attending_the_induction(): void
+    {
+        Mail::fake();
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        // Full flow: accept the application, then the person clicks the link.
+        $app = \App\Models\TraineeApplication::create([
+            'first_name' => 'Rooshan', 'last_name' => 'C', 'email' => 'rooshan@example.com',
+            'status' => 'Interview Attended',
+        ]);
+        $this->actingAs($admin)->postJson("/api/trainee-applications/{$app->id}/decision", [
+            'decision' => 'Accepted', 'induction_date' => 'Monday, 19th January, 10:00am',
+        ])->assertStatus(200);
+        $app->refresh();
+        $this->postJson('/api/trainee-placement-response/' . $app->placement_response_token, [
+            'placement_accepted' => true, 'induction_rsvp' => true,
+        ])->assertSuccessful();
+
+        // Others sent the same acceptance: one declined, one has not replied.
+        \App\Models\TraineeApplication::create([
+            'first_name' => 'Amy', 'last_name' => 'Lee', 'email' => 'amy@example.com', 'status' => 'Accepted',
+            'induction_date' => 'Monday, 19th January, 10:00am', 'placement_response_sent_at' => now(),
+            'placement_responded_at' => now(), 'placement_accepted' => true, 'induction_rsvp' => false,
+        ]);
+        \App\Models\QcApplication::create([
+            'name' => 'Ben Ode', 'legal_first_name' => 'Ben', 'legal_last_name' => 'Ode', 'email' => 'ben@example.com',
+            'status' => 'Accepted', 'induction_date' => 'Monday, 19th January, 10:00am', 'placement_response_sent_at' => now(),
+        ]);
+
+        $res = $this->actingAs($admin)->getJson('/api/inductions/placement-attendees')->assertStatus(200);
+
+        $this->assertSame(['attending' => 1, 'not_attending' => 1, 'no_reply' => 1], $res->json('totals'));
+        $group = $res->json('groups.0');
+        $this->assertSame('Monday, 19th January, 10:00am', $group['induction_date']);
+        $this->assertSame(['Rooshan C'], array_column($group['attending'], 'name'));
+        $this->assertSame('Trainee', $group['attending'][0]['type']);
+        $this->assertSame(['Amy Lee'], array_column($group['not_attending'], 'name'));
+        $this->assertSame(['Ben Ode'], array_column($group['no_reply'], 'name'));
+        $this->assertSame('Qualified', $group['no_reply'][0]['type']);
+    }
+
+    public function test_the_induction_list_is_staff_only(): void
+    {
+        $tcUser = User::factory()->create(['role' => 'counsellor']);
+        $this->actingAs($tcUser)->getJson('/api/inductions/placement-attendees')->assertStatus(403);
+    }
 }

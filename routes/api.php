@@ -387,6 +387,8 @@ Route::middleware(['auth:sanctum', 'impersonation.readonly', 'throttle:200,1'])-
 
     // Inductions (staff and admin only)
     Route::middleware('staff')->group(function () {
+        // Before the resource routes, so "placement-attendees" is not read as an induction id.
+        Route::get('/inductions/placement-attendees', [InductionController::class, 'placementAttendees']);
         Route::apiResource('inductions', InductionController::class)->except(['destroy']);
         Route::post('/inductions/{id}/add-attendees', [InductionController::class, 'addAttendees']);
     });
