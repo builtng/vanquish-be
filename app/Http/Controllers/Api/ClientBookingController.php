@@ -731,7 +731,7 @@ class ClientBookingController extends Controller
             $sessionsCount = 3; // Penalty applied
         }
 
-        if (!$this->tcStillOffersSlot($tc, $client->allocated_day, $this->formatTimeToHHi($client->allocated_time))) {
+        if (!$this->tcStillOffersSlot($tc, $client->allocated_day, $this->formatTimeToHHi($client->allocated_time), $client)) {
             return response()->json([
                 'auto' => false,
                 'slots' => [],
@@ -856,7 +856,7 @@ class ClientBookingController extends Controller
         // Confirm the counsellor's current weekly availability still includes
         // the client's regular day/time before generating any slots for it -
         // a TC may have dropped that slot since it was first allocated.
-        if (!$this->tcStillOffersSlot($tc, $client->allocated_day, $formattedTime)) {
+        if (!$this->tcStillOffersSlot($tc, $client->allocated_day, $formattedTime, $client)) {
             return [];
         }
 
@@ -901,22 +901,29 @@ class ClientBookingController extends Controller
      * given day/time (day names and abstract slot keys are matched
      * case-insensitively by their resolved clock time).
      */
-    private function tcStillOffersSlot(TrainingCounsellor $tc, ?string $day, string $formattedTime): bool
+    private function tcStillOffersSlot(TrainingCounsellor $tc, ?string $day, string $formattedTime, ?Client $client = null): bool
     {
         if (!$day) {
             return false;
         }
 
-        $availability = array_change_key_case($tc->availability ?? [], CASE_LOWER);
-        $daySlots = $availability[strtolower($day)] ?? [];
-
-        foreach ($daySlots as $slot) {
-            if ($this->formatTimeToHHi($slot) === $formattedTime) {
-                return true;
-            }
+        if (\App\Support\SlotTime::offers($tc->availability ?? [], $day, $formattedTime)) {
+            return true;
         }
 
-        return false;
+        // A time agreed with "Match manually" is outside the counsellor's
+        // weekly schedule on purpose: it is still this client's slot.
+        return $client !== null && $this->isManuallyAgreedSlot($client, $tc);
+    }
+
+    /** Whether the client's current match was made with "Match manually". */
+    private function isManuallyAgreedSlot(Client $client, TrainingCounsellor $tc): bool
+    {
+        return \App\Models\ClientTcMatch::where('client_id', $client->id)
+            ->where('tc_id', $tc->id)
+            ->where('status', 'assigned')
+            ->get(['flags'])
+            ->contains(fn ($m) => in_array('Manual match (availability override)', (array) ($m->flags ?? []), true));
     }
 
     private function formatTimeToHHi($timeString)

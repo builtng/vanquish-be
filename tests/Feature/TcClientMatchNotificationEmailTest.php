@@ -47,6 +47,9 @@ class TcClientMatchNotificationEmailTest extends TestCase
             'client_id' => $client->uuid,
             'tc_id' => $tc->uuid,
             'send_notification' => true,
+            // Low Cost matches need the weekly session time (22 Nov).
+            'allocated_day' => 'Monday',
+            'allocated_time' => '10am-1050am',
         ]);
 
         $response->assertStatus(201);
@@ -114,6 +117,9 @@ class TcClientMatchNotificationEmailTest extends TestCase
             'client_id' => $client->uuid,
             'tc_id' => $tc->uuid,
             'send_notification' => true,
+            // Low Cost matches need the weekly session time (22 Nov).
+            'allocated_day' => 'Monday',
+            'allocated_time' => '10am-1050am',
         ]);
 
         $response->assertStatus(201);

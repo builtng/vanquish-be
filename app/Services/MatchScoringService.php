@@ -126,60 +126,16 @@ class MatchScoringService
         ];
     }
 
-    private const ABSTRACT_SLOT_EXPANSIONS = [
-        'morning-early' => ['10am-1050am'],
-        'morning-late' => ['11am-1150am', '12pm-1250pm'],
-        'afternoon-early' => ['1pm-150pm', '2pm-250pm', '3pm-350pm'],
-        'afternoon-late' => ['4pm-450pm'],
-        'evening' => ['5pm-550pm', '6pm-650pm'],
-        'morning' => ['10am-1050am', '11am-1150am'],
-        'afternoon' => ['12pm-1250pm', '1pm-150pm', '2pm-250pm', '3pm-350pm', '4pm-450pm'],
-    ];
-
-    private function expandSlot(string $slot): array
-    {
-        $clean = strtolower(preg_replace('/\s+/', '', $slot));
-        return self::ABSTRACT_SLOT_EXPANSIONS[$clean] ?? [$clean];
-    }
-
     private function scoreAvailability(array $clientData, TrainingCounsellor $tc): int
     {
-        $rawClient = $clientData['availability'] ?? [];
-        if (is_string($rawClient)) {
-            $rawClient = json_decode($rawClient, true) ?: [];
-        }
-        $clientAvailability = is_array($rawClient) ? array_change_key_case($rawClient, CASE_LOWER) : [];
-
-        $rawTc = $tc->availability ?? [];
-        if (is_string($rawTc)) {
-            $rawTc = json_decode($rawTc, true) ?: [];
-        }
-        $tcAvailability = is_array($rawTc) ? array_change_key_case($rawTc, CASE_LOWER) : [];
-
-        $clientSlots = [];
-        foreach ($clientAvailability as $day => $times) {
-            foreach ((array) $times as $time) {
-                foreach ($this->expandSlot((string) $time) as $exp) {
-                    $clientSlots[] = $day . '|' . $exp;
-                }
-            }
-        }
-        $clientSlots = array_unique($clientSlots);
-
+        // Same comparison as the matching screen and assignMatch: any
+        // day-name case, slots compared by their start time.
+        $clientSlots = \App\Support\SlotTime::keys($clientData['availability'] ?? []);
         if (empty($clientSlots)) {
             return 100;
         }
 
-        $tcSlots = [];
-        foreach ($tcAvailability as $day => $times) {
-            foreach ((array) $times as $time) {
-                foreach ($this->expandSlot((string) $time) as $exp) {
-                    $tcSlots[] = $day . '|' . $exp;
-                }
-            }
-        }
-        $tcSlots = array_unique($tcSlots);
-
+        $tcSlots = \App\Support\SlotTime::keys($tc->availability ?? []);
         $matched = count(array_intersect($clientSlots, $tcSlots));
 
         return (int) round(($matched / count($clientSlots)) * 100);
