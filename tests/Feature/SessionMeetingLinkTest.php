@@ -40,45 +40,46 @@ class SessionMeetingLinkTest extends TestCase
         return [$tc, $other, $client, $session];
     }
 
-    public function test_the_sessions_counsellor_can_add_change_and_remove_the_link(): void
+    public function test_an_admin_can_add_change_and_remove_the_link(): void
     {
         [$tc, , , $session] = $this->setUpSession();
-        $user = User::factory()->create(['role' => 'counsellor', 'training_counsellor_id' => $tc->id]);
+        $admin = User::factory()->create(['role' => 'admin']);
 
-        $this->actingAs($user)->patchJson("/api/sessions/{$session->id}/meeting-link", [
+        $this->actingAs($admin)->patchJson("/api/sessions/{$session->id}/meeting-link", [
             'meeting_link' => 'https://zoom.us/j/123456789',
         ])->assertOk()->assertJsonPath('session.meeting_link', 'https://zoom.us/j/123456789');
 
-        // Shown in the counsellor portal
+        // The counsellor sees it in their portal
+        $user = User::factory()->create(['role' => 'counsellor', 'training_counsellor_id' => $tc->id]);
+        $this->app['auth']->forgetGuards();
         $this->actingAs($user)->getJson('/api/counsellor/my-data')
             ->assertOk()
             ->assertJsonPath('upcoming_sessions.0.meeting_link', 'https://zoom.us/j/123456789');
 
-        // Removing it
-        $this->actingAs($user)->patchJson("/api/sessions/{$session->id}/meeting-link", ['meeting_link' => ''])
+        // Super admins too; removing it
+        $super = User::factory()->create(['role' => 'super_admin']);
+        $this->app['auth']->forgetGuards();
+        $this->actingAs($super)->patchJson("/api/sessions/{$session->id}/meeting-link", ['meeting_link' => ''])
             ->assertOk();
         $this->assertNull($session->fresh()->meeting_link);
     }
 
-    public function test_staff_can_add_a_link_to_any_session(): void
+    public function test_counsellors_and_other_staff_cannot_set_the_link(): void
     {
-        [, , , $session] = $this->setUpSession();
-        $admin = User::factory()->create(['role' => 'admin']);
+        [$tc, , , $session] = $this->setUpSession();
+        $users = [
+            User::factory()->create(['role' => 'counsellor', 'training_counsellor_id' => $tc->id]), // even the session's own counsellor
+            User::factory()->create(['role' => 'staff']),
+            User::factory()->create(['role' => 'consultation_staff']),
+            User::factory()->create(['role' => 'compliance_officer']),
+        ];
 
-        $this->actingAs($admin)->patchJson("/api/sessions/{$session->id}/meeting-link", [
-            'meeting_link' => 'https://teams.microsoft.com/l/meetup-join/abc',
-        ])->assertOk();
-        $this->assertSame('https://teams.microsoft.com/l/meetup-join/abc', $session->fresh()->meeting_link);
-    }
-
-    public function test_another_counsellor_cannot_set_the_link(): void
-    {
-        [, $other, , $session] = $this->setUpSession();
-        $user = User::factory()->create(['role' => 'counsellor', 'training_counsellor_id' => $other->id]);
-
-        $this->actingAs($user)->patchJson("/api/sessions/{$session->id}/meeting-link", [
-            'meeting_link' => 'https://zoom.us/j/1',
-        ])->assertForbidden();
+        foreach ($users as $user) {
+            $this->app['auth']->forgetGuards();
+            $this->actingAs($user)->patchJson("/api/sessions/{$session->id}/meeting-link", [
+                'meeting_link' => 'https://zoom.us/j/1',
+            ])->assertForbidden();
+        }
         $this->assertNull($session->fresh()->meeting_link);
     }
 

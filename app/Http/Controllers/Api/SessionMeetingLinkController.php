@@ -8,9 +8,9 @@ use Illuminate\Http\Request;
 
 /**
  * Set or clear the video-call link of one booked therapy session.
- * Allowed: staff, or the counsellor the session belongs to. (An admin
- * viewing a counsellor's portal is read-only and is refused by
- * BlockImpersonationWrites before reaching here.)
+ * Admins only (admin, super_admin): not other staff roles, not counsellors.
+ * An admin viewing a counsellor's portal is read-only and is refused by
+ * BlockImpersonationWrites before reaching here.
  */
 class SessionMeetingLinkController extends Controller
 {
@@ -19,12 +19,8 @@ class SessionMeetingLinkController extends Controller
         $user = $request->user();
         $session = Session::findOrFail($id);
 
-        $isOwnCounsellor = $user->isCounsellor()
-            && $user->training_counsellor_id
-            && (int) $user->training_counsellor_id === (int) $session->tc_id;
-
-        if (!$user->isStaff() && !$isOwnCounsellor) {
-            return response()->json(['message' => 'You can only add links to your own sessions.'], 403);
+        if (!$user->isAdmin()) {
+            return response()->json(['message' => 'Only an admin can set the meeting link.'], 403);
         }
 
         $validated = $request->validate([

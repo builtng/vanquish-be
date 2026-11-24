@@ -223,7 +223,7 @@ Route::middleware(['auth:sanctum', 'impersonation.readonly', 'throttle:200,1'])-
         Route::get('/counsellor/holidays', [TrainingCounsellorHolidayController::class, 'myHolidays']);
         Route::post('/counsellor/holidays', [TrainingCounsellorHolidayController::class, 'requestHoliday']);
         Route::get('/counsellor/conduct-events', [TcConductEventController::class, 'myEvents']);
-        // Video-call link for a booked session (staff or the session's own counsellor)
+        // Video-call link for a booked session (admins only; checked in the controller)
         Route::patch('/sessions/{id}/meeting-link', [\App\Http\Controllers\Api\SessionMeetingLinkController::class, 'update']);
     });
 
