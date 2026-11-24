@@ -680,10 +680,25 @@ class TrainingCounsellorController extends Controller
             ->orderBy('scheduled_at')
             ->get();
 
+        // Booked therapy sessions live in a separate table; without these the
+        // portal showed nothing after a client booked (VQT 22 Nov #8).
+        $upcomingSessions = $tc->sessions()
+            ->where('status', 'scheduled')
+            ->whereNull('archived_at')
+            ->where('scheduled_at', '>=', now())
+            ->with('client:id,uuid,name')
+            ->orderBy('scheduled_at')
+            ->get([
+                'id', 'client_id', 'tc_id', 'session_type', 'scheduled_at', 'status',
+                'duration_minutes', 'payment_status', 'is_block_booking',
+                'block_number', 'total_sessions_in_block',
+            ]);
+
         return response()->json([
             'tc'                     => $tc,
             'clients'                => $tc->clients,
             'upcoming_consultations' => $upcomingConsultations,
+            'upcoming_sessions'      => $upcomingSessions,
             'total_clients'          => $tc->clients()->count(),
             'attendance_group'       => $tc->attendanceGroup,
         ]);

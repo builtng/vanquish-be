@@ -185,6 +185,15 @@ class TrainingCounsellor extends Model
         return $this->hasMany(Consultation::class, 'tc_id');
     }
 
+    /**
+     * Booked therapy sessions (consultation_sessions table), as opposed to
+     * consultations().
+     */
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(Session::class, 'tc_id');
+    }
+
     public function matches(): HasMany
     {
         return $this->hasMany(ClientTcMatch::class, 'tc_id');
