@@ -654,7 +654,11 @@ class ClientBookingController extends Controller
                 'total_sessions_in_block' => $sessionsCount,
                 'payment_status' => 'pending',
                 'booking_deadline' => $isLowCost && $i === count($sessionDates) - 1 ? $bookingDeadline : null,
-                'auto_deduction_applied' => $isLowCost && $sessionsCount === 3,
+                // Left unmarked even for a 3-session penalty block, so a later
+                // missed deadline is penalised again by
+                // bookings:apply-auto-deduction. The penalty itself shows as
+                // total_sessions_in_block = 3.
+                'auto_deduction_applied' => false,
             ]);
 
             $sessions[] = $session;

@@ -391,6 +391,49 @@ class VqtFeedbackNov16Test extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_auto_deduction_applies_again_when_a_later_deadline_is_missed(): void
+    {
+        Mail::fake();
+        Carbon::setTestNow(Carbon::parse('2026-11-16 09:00:00'));
+
+        $tc = $this->counsellor();
+        $client = Client::create([
+            'client_id' => 'CL011', 'name' => 'Tom Smith', 'email' => 'tom2@example.com',
+            'service_type' => 'Low Cost', 'stage' => 'Sessions Booked',
+            'matched_tc_id' => $tc->id, 'agreement_status' => 'signed',
+            'next_booking_deadline' => '2026-11-15',
+        ]);
+        Session::create([
+            'client_id' => $client->id, 'tc_id' => $tc->id, 'session_type' => 'low_cost',
+            'scheduled_at' => '2026-11-17 18:00:00', 'status' => 'scheduled',
+            'is_block_booking' => true, 'block_number' => 4, 'total_sessions_in_block' => 4,
+            'booking_deadline' => '2026-11-22',
+        ]);
+
+        // First missed deadline: 3 sessions (24 Nov, 1 Dec, 8 Dec).
+        $this->artisan('bookings:apply-auto-deduction')->assertExitCode(0);
+        $this->assertSame(4, Session::where('client_id', $client->id)->count());
+        $this->assertSame('2026-12-13', $client->fresh()->next_booking_deadline->format('Y-m-d'));
+
+        // The client misses that deadline too: penalised again (it used to
+        // apply only once), 3 more sessions from 15 Dec.
+        Carbon::setTestNow(Carbon::parse('2026-12-14 09:00:00'));
+        $this->artisan('bookings:apply-auto-deduction')->assertExitCode(0);
+        $second = Session::where('client_id', $client->id)
+            ->where('scheduled_at', '>', '2026-12-08 18:00:00')->orderBy('scheduled_at')->get();
+        $this->assertSame(
+            ['2026-12-15 18:00:00', '2026-12-22 18:00:00', '2026-12-29 18:00:00'],
+            $second->map(fn ($s) => $s->scheduled_at->format('Y-m-d H:i:s'))->all()
+        );
+        $this->assertSame('2027-01-03', $client->fresh()->next_booking_deadline->format('Y-m-d'));
+
+        // Still only once per missed deadline.
+        $this->artisan('bookings:apply-auto-deduction')->assertExitCode(0);
+        $this->assertSame(7, Session::where('client_id', $client->id)->count());
+
+        Carbon::setTestNow();
+    }
+
     // ── 5. Emergency contact step removed from the intake forms ─────
 
     public function test_intake_is_accepted_without_emergency_contact_details(): void

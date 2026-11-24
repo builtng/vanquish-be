@@ -121,7 +121,10 @@ class ApplyAutoDeduction extends Command
                 'block_number' => $i + 1,
                 'total_sessions_in_block' => 3,
                 'payment_status' => 'pending',
-                'auto_deduction_applied' => true,
+                // The flag marks a session whose missed deadline has been
+                // handled. New sessions start unmarked, so the next missed
+                // deadline is penalised again (it used to apply only once).
+                'auto_deduction_applied' => false,
                 'booking_deadline' => $isLast ? Carbon::parse($sessionDate)->addWeek()->subHours(48)->format('Y-m-d') : null,
             ]);
         }
