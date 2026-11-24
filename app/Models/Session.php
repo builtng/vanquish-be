@@ -24,6 +24,7 @@ class Session extends Model
         'archived_at',
         'duration_minutes',
         'notes',
+        'meeting_link',
         'payment_status',
         'payment_amount',
         'stripe_payment_intent_id',

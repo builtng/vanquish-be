@@ -688,11 +688,13 @@ class TrainingCounsellorController extends Controller
             ->where('scheduled_at', '>=', now())
             ->with('client:id,uuid,name')
             ->orderBy('scheduled_at')
-            ->get([
+            ->get(array_merge([
                 'id', 'client_id', 'tc_id', 'session_type', 'scheduled_at', 'status',
                 'duration_minutes', 'payment_status', 'is_block_booking',
                 'block_number', 'total_sessions_in_block',
-            ]);
+            ], \Illuminate\Support\Facades\Schema::hasColumn('consultation_sessions', 'meeting_link')
+                // Until the 2026_11_24 migration has run on the server
+                ? ['meeting_link'] : []));
 
         return response()->json([
             'tc'                     => $tc,
