@@ -368,6 +368,30 @@ class VqtFeedbackNov10Test extends TestCase
         }
     }
 
+    public function test_qualified_counsellor_onboarding_email_has_no_therapy_form_or_trainee_agreement(): void
+    {
+        $mail = new DynamicEmail('qc_onboarding_paperwork', [
+            'first_name' => 'Vaseline',
+            'agreement_download_link' => 'https://x/templates/4-way-agreement-trainee.docx',
+            'therapy_form_url' => 'https://x/therapy-form',
+        ]);
+        $html = $mail->render();
+
+        $this->assertStringContainsString('Vaseline', $html);
+        $this->assertStringContainsString('Qualified Counsellor Agreement', $html);
+        $this->assertStringNotContainsStringIgnoringCase('therapy form', $html);
+        $this->assertStringNotContainsString('https://x/therapy-form', $html);
+        $this->assertStringNotContainsStringIgnoringCase('4-way', $html);
+        $this->assertStringNotContainsStringIgnoringCase('tutor', $html);
+
+        // Trainees still get both.
+        $trainee = (new DynamicEmail('trainee_onboarding_paperwork', [
+            'first_name' => 'T', 'agreement_download_link' => 'https://x/a.docx', 'therapy_form_url' => 'https://x/therapy-form',
+        ]))->render();
+        $this->assertStringContainsString('https://x/therapy-form', $trainee);
+        $this->assertStringContainsStringIgnoringCase('4-Way Agreement', $trainee);
+    }
+
     public function test_saved_trainee_template_gets_the_accept_button_added(): void
     {
         $body = '<p>Hi</p><h2 style="color: #6f1d56; font-size: 17px; border-bottom: 2px solid #f0e6ed; padding-bottom: 8px; margin: 24px 0 16px 0;">Immediate Paperwork Requirements</h2><p>x</p>';

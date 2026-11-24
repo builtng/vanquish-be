@@ -65,6 +65,37 @@ class AcceptanceEmailContent
 <p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 24px;">Warm congratulations once again, and welcome to the team!<br><br><span style="font-weight: normal; color: #777777; font-size: 13px;">The Compliance Team<br>Vanquish Therapies</span></p>';
     }
 
+    public static function qcOnboardingSubject(): string
+    {
+        return 'Action Required: Your Qualified Counsellor Agreement';
+    }
+
+    /**
+     * Qualified counsellors sign an agreement (sent via JotForm) but do not
+     * complete the personal therapy form or the trainee 4-way agreement
+     * (VQT, 22 Nov). Admins can edit this in Settings > Email Management,
+     * e.g. to add the JotForm link.
+     */
+    public static function qcOnboardingBody(): string
+    {
+        return '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;">
+  <div style="background: linear-gradient(135deg, #6f1d56 0%, #9b2c7e 100%); padding: 40px 32px; border-radius: 12px 12px 0 0; text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 26px;">Action Required</h1>
+    <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 15px;">Complete Your Onboarding — Vanquish Therapies</p>
+  </div>
+  <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none;">
+    <p style="font-size: 16px; margin-top: 0;">Dear <strong>{{first_name}}</strong>,</p>
+    <p>To finalise your onboarding, please sign your <strong>Qualified Counsellor Agreement</strong> before your induction date.</p>
+    <div style="padding: 16px; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; margin: 20px 0;">
+      <p style="margin: 0; font-size: 14px;"><strong>Qualified Counsellor Agreement</strong></p>
+      <p style="margin: 4px 0 0; font-size: 13px; color: #92400e;">We will send you the agreement to sign online. Please complete it as soon as you receive it.</p>
+    </div>
+    <p style="font-size: 14px; color: #475569;">If you have any questions, just reply to this email.</p>
+    <p style="font-size: 15px; font-weight: bold; color: #6f1d56; margin-top: 32px;">Best regards,<br><span style="font-weight: normal; color: #777; font-size: 13px;">Compliance &amp; Clinical Lead</span></p>
+  </div>
+</div>';
+    }
+
     /** Removes "placement" wording from text written for trainees. */
     public static function qcWording(string $text): string
     {
@@ -97,7 +128,14 @@ class AcceptanceEmailContent
             'placeholders' => $acceptPlaceholders,
         ];
 
-        foreach (['qc_onboarding_paperwork', 'qc_placement_rejection'] as $type) {
+        // Own wording: no personal therapy form, no trainee 4-way agreement.
+        $defaults['qc_onboarding_paperwork'] = [
+            'subject' => self::qcOnboardingSubject(),
+            'body' => self::qcOnboardingBody(),
+            'placeholders' => ['first_name'],
+        ];
+
+        foreach (['qc_placement_rejection'] as $type) {
             if (isset($defaults[$type])) {
                 $defaults[$type]['subject'] = self::qcWording($defaults[$type]['subject']);
                 $defaults[$type]['body'] = self::qcWording($defaults[$type]['body']);
